@@ -1,0 +1,20 @@
+@import "bootstrap/scss/bootstrap";
+@import "bootstrap-icons/font/bootstrap-icons.css";
+
+body {
+    transition: background-color 0.3s, color 0.3s, font-size 0.3s;
+}
+
+.font-size-small { font-size: 0.875rem; }
+.font-size-medium { font-size: 1rem; }
+.font-size-large { font-size: 1.25rem; }
+
+// Custom color schemes
+.color-scheme-blue { --bs-primary: #007bff; }
+.color-scheme-green { --bs-primary: #28a745; }
+.color-scheme-red { --bs-primary: #dc3545; }
+
+[data-bs-theme="dark"] {
+    background-color: #212529;
+    color: #f8f9fa;
+}
