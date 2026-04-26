@@ -22,6 +22,8 @@ Route::middleware(['auth'])->group(function () {
     Route::delete('/notes/{note}', [\App\Http\Controllers\NoteController::class, 'destroy'])->name('notes.destroy');
     Route::post('/notes/{note}/pin', [\App\Http\Controllers\NoteController::class, 'togglePin'])->name('notes.pin');
     Route::post('/notes/{note}/image', [\App\Http\Controllers\NoteController::class, 'uploadImage'])->name('notes.image');
+    Route::post('/notes/image/{image}/replace', [\App\Http\Controllers\NoteController::class, 'replaceImage'])->name('notes.image.replace');
+    Route::delete('/notes/image/{image}', [\App\Http\Controllers\NoteController::class, 'deleteImage'])->name('notes.image.destroy');
     Route::post('/notes/{note}/labels', [\App\Http\Controllers\NoteController::class, 'syncLabels'])->name('notes.labels');
 
     Route::post('/labels', [\App\Http\Controllers\LabelController::class, 'store'])->name('labels.store');

@@ -3,41 +3,75 @@ import { useEffect } from 'react';
 
 export default function BootstrapLayout({ children }) {
     const { auth } = usePage().props;
-    const user = auth.user;
-    const preferences = user?.preferences || { font_size: 'medium', color_scheme: 'blue', theme: 'light' };
+    const user = auth?.user;
+    
+    // Default preferences
+    const preferences = user?.preferences || { 
+        font_size: 'medium', 
+        color_scheme: 'blue', 
+        theme: 'light',
+        text_color: ''
+    };
 
     useEffect(() => {
-        // Apply preferences
-        document.documentElement.setAttribute('data-bs-theme', preferences.theme || 'light');
-        document.body.className = `font-size-${preferences.font_size || 'medium'} color-scheme-${preferences.color_scheme || 'blue'}`;
+        const root = document.documentElement;
+        
+        // 1. Apply BS5 Theme
+        root.setAttribute('data-bs-theme', preferences.theme || 'light');
+
+        // 2. Apply Custom Text Color via CSS Variable (More powerful than direct style)
+        if (preferences.text_color) {
+            root.style.setProperty('--bs-body-color', preferences.text_color);
+            root.style.setProperty('--bs-body-color-rgb', hexToRgb(preferences.text_color));
+        } else {
+            root.style.removeProperty('--bs-body-color');
+            root.style.removeProperty('--bs-body-color-rgb');
+        }
+        
+        // 3. Apply classes for font size and primary theme
+        document.body.className = `font-size-${preferences.font_size || 'medium'} theme-${preferences.color_scheme || 'blue'}`;
     }, [preferences]);
 
+    // Helper to convert hex to RGB for BS5 variables
+    function hexToRgb(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : null;
+    }
+
     return (
-        <div className="min-vh-100 d-flex flex-column">
+        <div className="min-vh-100 d-flex flex-column bg-body text-body transition-all">
             {user && !user.is_active && (
-                <div className="alert alert-warning alert-dismissible fade show rounded-0 mb-0 text-center" role="alert">
-                    <strong>Cảnh báo!</strong> Tài khoản của bạn chưa được kích hoạt. Vui lòng kiểm tra email để kích hoạt.
+                <div className="alert alert-warning border-0 rounded-0 mb-0 py-2 text-center shadow-sm" style={{ zIndex: 1050 }}>
+                    <i className="bi bi-exclamation-triangle-fill me-2"></i>
+                    Tài khoản chưa kích hoạt. Vui lòng xác nhận email để bảo mật tài khoản.
                 </div>
             )}
 
-            <nav className="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
+            <nav className="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm sticky-top py-2">
                 <div className="container">
-                    <Link className="navbar-brand fw-bold" href="/">Account Manager</Link>
-                    <button className="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                    <Link className="navbar-brand fw-bold d-flex align-items-center" href="/">
+                        <div className="bg-white text-primary rounded-circle d-flex align-items-center justify-content-center me-2" style={{ width: '32px', height: '32px' }}>
+                            <i className="bi bi-journal-text"></i>
+                        </div>
+                        NotePro
+                    </Link>
+                    <button className="navbar-toggler border-0 shadow-none" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                         <span className="navbar-toggler-icon"></span>
                     </button>
                     <div className="collapse navbar-collapse" id="navbarNav">
-                        <ul className="navbar-nav ms-auto">
+                        <ul className="navbar-nav ms-auto align-items-center gap-1">
                             {user ? (
                                 <>
                                     <li className="nav-item">
-                                        <Link className="nav-link" href={route('dashboard')}>Dashboard</Link>
+                                        <Link className={`nav-link px-3 rounded-pill ${route().current('dashboard') ? 'active bg-white bg-opacity-10' : ''}`} href={route('dashboard')}>Ghi chú</Link>
                                     </li>
                                     <li className="nav-item">
-                                        <Link className="nav-link" href={route('preferences')}>Tùy chọn</Link>
+                                        <Link className={`nav-link px-3 rounded-pill ${route().current('preferences') ? 'active bg-white bg-opacity-10' : ''}`} href={route('preferences')}>Cài đặt</Link>
                                     </li>
-                                    <li className="nav-item">
-                                        <Link className="nav-link" href={route('logout')} method="post" as="button">Đăng xuất</Link>
+                                    <li className="nav-item ms-lg-2">
+                                        <Link className="btn btn-outline-light btn-sm rounded-pill px-4 fw-bold border-2" href={route('logout')} method="post" as="button">
+                                            Thoát
+                                        </Link>
                                     </li>
                                 </>
                             ) : (
@@ -45,8 +79,8 @@ export default function BootstrapLayout({ children }) {
                                     <li className="nav-item">
                                         <Link className="nav-link" href={route('login')}>Đăng nhập</Link>
                                     </li>
-                                    <li className="nav-item">
-                                        <Link className="nav-link" href={route('register')}>Đăng ký</Link>
+                                    <li className="nav-item ms-lg-2">
+                                        <Link className="btn btn-light btn-sm rounded-pill px-4 fw-bold" href={route('register')}>Đăng ký</Link>
                                     </li>
                                 </>
                             )}
@@ -55,14 +89,16 @@ export default function BootstrapLayout({ children }) {
                 </div>
             </nav>
 
-            <main className="flex-grow-1 py-4 bg-light">
+            <main className="flex-grow-1 py-4 bg-body-tertiary">
                 <div className="container">
                     {children}
                 </div>
             </main>
 
-            <footer className="py-3 bg-white border-top text-center text-muted">
-                &copy; 2024 Account Management System
+            <footer className="py-4 bg-body border-top text-center opacity-75 small">
+                <div className="container">
+                    &copy; 2024 NotePro. Phát triển bởi Đội ngũ Senior Full-stack.
+                </div>
             </footer>
         </div>
     );

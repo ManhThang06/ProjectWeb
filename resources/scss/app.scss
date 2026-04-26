@@ -3,18 +3,32 @@
 
 body {
     transition: background-color 0.3s, color 0.3s, font-size 0.3s;
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
 }
 
-.font-size-small { font-size: 0.875rem; }
-.font-size-medium { font-size: 1rem; }
-.font-size-large { font-size: 1.25rem; }
+// Font sizes
+.font-size-small { font-size: 0.875rem !important; }
+.font-size-medium { font-size: 1rem !important; }
+.font-size-large { font-size: 1.25rem !important; }
 
-// Custom color schemes
-.color-scheme-blue { --bs-primary: #007bff; }
-.color-scheme-green { --bs-primary: #28a745; }
-.color-scheme-red { --bs-primary: #dc3545; }
+// Primary Color Schemes
+.theme-blue { --bs-primary: #0d6efd; --bs-primary-rgb: 13, 110, 253; --bs-link-color: #0d6efd; }
+.theme-green { --bs-primary: #198754; --bs-primary-rgb: 25, 135, 84; --bs-link-color: #198754; }
+.theme-red { --bs-primary: #dc3545; --bs-primary-rgb: 220, 53, 69; --bs-link-color: #dc3545; }
 
-[data-bs-theme="dark"] {
-    background-color: #212529;
-    color: #f8f9fa;
+// Override any hardcoded text colors that might interfere with custom text color
+.text-body-custom {
+    color: inherit !important;
+}
+
+// Utility to ensure cards/modals follow theme
+.card, .modal-content {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border-color: var(--bs-border-color);
+}
+
+.bg-body-secondary-custom {
+    background-color: var(--bs-secondary-bg) !important;
 }

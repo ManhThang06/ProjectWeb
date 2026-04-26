@@ -13,6 +13,7 @@ class UserPreferenceController extends Controller
             'font_size' => 'required|string|in:small,medium,large',
             'color_scheme' => 'required|string',
             'theme' => 'required|string|in:light,dark',
+            'text_color' => 'nullable|string|max:7',
         ]);
 
         $user = Auth::user();

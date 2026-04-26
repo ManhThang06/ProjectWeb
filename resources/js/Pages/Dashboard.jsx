@@ -1,6 +1,6 @@
 import BootstrapLayout from '@/Layouts/BootstrapLayout';
 import { Head, router } from '@inertiajs/react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import useDebounce from '@/Hooks/useDebounce';
 import ConfirmationModal from '@/Components/ConfirmationModal';
 import LabelManager from '@/Components/LabelManager';
@@ -17,22 +17,38 @@ export default function Dashboard({ notes: initialNotes, labels, filters }) {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [showLabelManager, setShowLabelManager] = useState(false);
     const [noteToDelete, setNoteToDelete] = useState(null);
+    const [previewImage, setPreviewImage] = useState(null);
 
     const [noteForm, setNoteForm] = useState({ title: '', content: '' });
     const debouncedNoteForm = useDebounce(noteForm, 300);
     const [isSaving, setIsSaving] = useState(false);
 
-    // Sync initial notes from props
+    // Sync initial notes from props and update selectedNote
     useEffect(() => {
         setNotes(initialNotes);
+        if (selectedNote) {
+            const updated = initialNotes.find(n => n.id === selectedNote.id);
+            if (updated) setSelectedNote(updated);
+        }
     }, [initialNotes]);
 
-    // Live Search
-    useEffect(() => {
-        router.get(route('dashboard'), { search: debouncedSearch, label_id: filters.label_id }, {
+    // Consolidated filtering logic
+    const handleFilter = useCallback((newSearch, newLabelId) => {
+        router.get(route('dashboard'), { 
+            search: newSearch, 
+            label_id: newLabelId || undefined
+        }, {
             preserveState: true,
-            replace: true
+            replace: true,
+            preserveScroll: true
         });
+    }, []);
+
+    // Live Search effect
+    useEffect(() => {
+        if (debouncedSearch !== filters.search) {
+            handleFilter(debouncedSearch, filters.label_id);
+        }
     }, [debouncedSearch]);
 
     // Auto-save logic
@@ -47,8 +63,6 @@ export default function Dashboard({ notes: initialNotes, labels, filters }) {
         try {
             const response = await axios.patch(route('notes.update', id), data);
             setNotes(prev => prev.map(n => n.id === id ? { ...n, ...response.data } : n));
-            // Don't update selectedNote here to avoid resetting input cursor if not careful, 
-            // but we need to keep it in sync for the next debounce.
             setSelectedNote(prev => ({ ...prev, ...response.data }));
         } catch (error) {
             console.error('Auto-save failed', error);
@@ -95,247 +109,254 @@ export default function Dashboard({ notes: initialNotes, labels, filters }) {
     };
 
     const togglePin = (note) => {
-        router.post(route('notes.pin', note.id), {}, { 
-            preserveScroll: true,
-            onSuccess: (page) => {
-                if (selectedNote && selectedNote.id === note.id) {
-                    const updated = page.props.notes.find(n => n.id === note.id);
-                    setSelectedNote(updated);
-                }
-            }
-        });
+        router.post(route('notes.pin', note.id), {}, { preserveScroll: true });
     };
 
-    const handleImageUpload = async (e) => {
+    const handleImageUpload = (e, replaceId = null) => {
         const file = e.target.files[0];
         if (!file) return;
 
         const formData = new FormData();
         formData.append('image', file);
 
-        try {
-            await axios.post(route('notes.image', selectedNote.id), formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
+        if (replaceId) {
+            router.post(route('notes.image.replace', replaceId), formData, {
+                onSuccess: () => router.reload({ only: ['notes'] })
             });
-            // Reload page to get updated images or update local state
-            router.reload({ only: ['notes'] });
-        } catch (error) {
-            console.error('Image upload failed', error);
+        } else {
+            router.post(route('notes.image', selectedNote.id), formData, {
+                onSuccess: () => router.reload({ only: ['notes'] })
+            });
+        }
+    };
+
+    const handleDeleteImage = (imgId) => {
+        if (confirm('Xóa ảnh này khỏi ghi chú?')) {
+            router.delete(route('notes.image.destroy', imgId), {
+                preserveScroll: true,
+                onSuccess: () => router.reload({ only: ['notes'] })
+            });
         }
     };
 
     const handleLabelSync = (label) => {
         const currentLabels = selectedNote.labels.map(l => l.id);
-        let newLabelIds;
-        if (currentLabels.includes(label.id)) {
-            newLabelIds = currentLabels.filter(id => id !== label.id);
-        } else {
-            newLabelIds = [...currentLabels, label.id];
-        }
+        const newLabelIds = currentLabels.includes(label.id) 
+            ? currentLabels.filter(id => id !== label.id) 
+            : [...currentLabels, label.id];
 
         router.post(route('notes.labels', selectedNote.id), { label_ids: newLabelIds }, {
             preserveScroll: true,
-            onSuccess: (page) => {
-                const updated = page.props.notes.find(n => n.id === selectedNote.id);
-                setSelectedNote(updated);
-            }
+            onSuccess: () => router.reload({ only: ['notes'] })
         });
     };
 
     return (
         <BootstrapLayout>
-            <Head title="Ghi chú cá nhân" />
+            <Head title="Quản lý ghi chú" />
             
-            <div className="container py-4">
-                {/* Search and Toggle Bar */}
-                <div className="row mb-4 align-items-center g-3">
-                    <div className="col-md-6">
-                        <div className="input-group shadow-sm rounded">
-                            <span className="input-group-text bg-white border-0">
-                                <i className="bi bi-search text-muted"></i>
+            <div className="container py-2">
+                {/* Search and Action Bar */}
+                <div className="row mb-5 align-items-center g-3">
+                    <div className="col-md-7">
+                        <div className="input-group shadow-sm rounded-pill bg-body border overflow-hidden px-2">
+                            <span className="input-group-text bg-transparent border-0 pe-1">
+                                <i className="bi bi-search text-secondary opacity-50"></i>
                             </span>
                             <input 
                                 type="text" 
-                                className="form-control border-0 py-2 shadow-none" 
-                                placeholder="Tìm kiếm trong tiêu đề và nội dung..." 
+                                className="form-control border-0 py-2 shadow-none bg-transparent" 
+                                placeholder="Tìm kiếm ghi chú..." 
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                             />
                         </div>
                     </div>
-                    <div className="col-md-6 d-flex justify-content-md-end gap-2">
-                        <div className="btn-group shadow-sm">
-                            <button 
-                                className={`btn btn-white ${viewMode === 'grid' ? 'text-primary' : 'text-muted'}`}
-                                onClick={() => setViewMode('grid')}
-                            >
+                    <div className="col-md-5 d-flex justify-content-md-end gap-2">
+                        <div className="btn-group shadow-sm bg-body border rounded-pill p-1">
+                            <button className={`btn btn-sm border-0 rounded-circle ${viewMode === 'grid' ? 'btn-primary shadow-sm' : 'btn-link text-secondary'}`} onClick={() => setViewMode('grid')}>
                                 <i className="bi bi-grid-fill"></i>
                             </button>
-                            <button 
-                                className={`btn btn-white ${viewMode === 'list' ? 'text-primary' : 'text-muted'}`}
-                                onClick={() => setViewMode('list')}
-                            >
-                                <i className="bi bi-list-task"></i>
+                            <button className={`btn btn-sm border-0 rounded-circle ${viewMode === 'list' ? 'btn-primary shadow-sm' : 'btn-link text-secondary'}`} onClick={() => setViewMode('list')}>
+                                <i className="bi bi-list-ul"></i>
                             </button>
                         </div>
-                        <button className="btn btn-primary rounded-pill px-4 shadow-sm" onClick={() => openNote()}>
-                            <i className="bi bi-plus-lg me-1"></i> Tạo mới
+                        <button className="btn btn-primary rounded-pill px-4 shadow fw-bold transition-all" onClick={() => openNote()}>
+                            <i className="bi bi-plus-lg me-1"></i> Ghi chú mới
                         </button>
                     </div>
                 </div>
 
-                {/* Labels Filter Bar */}
-                <div className="d-flex gap-2 mb-4 overflow-auto pb-2 scrollbar-hide">
+                {/* Filter Bar */}
+                <div className="d-flex gap-2 mb-4 overflow-auto pb-3 scrollbar-hide align-items-center">
                     <button 
-                        className={`btn btn-sm rounded-pill px-3 ${!filters.label_id ? 'btn-primary shadow-sm' : 'btn-light border'}`}
-                        onClick={() => router.get(route('dashboard'), { search })}
+                        className={`btn btn-sm rounded-pill px-3 fw-medium ${!filters.label_id ? 'btn-primary shadow-sm' : 'btn-body border'}`} 
+                        onClick={() => handleFilter(search, null)}
                     >
                         Tất cả
                     </button>
                     {labels.map(label => (
                         <button 
-                            key={label.id}
-                            className={`btn btn-sm rounded-pill px-3 ${filters.label_id == label.id ? 'btn-primary shadow-sm' : 'btn-light border'}`}
-                            onClick={() => router.get(route('dashboard'), { search, label_id: label.id })}
+                            key={label.id} 
+                            className={`btn btn-sm rounded-pill px-3 fw-medium ${filters.label_id == label.id ? 'btn-primary shadow-sm' : 'btn-body border'}`} 
+                            onClick={() => handleFilter(search, label.id)}
                         >
                             {label.name}
                         </button>
                     ))}
-                    <button className="btn btn-sm btn-light rounded-pill border" onClick={() => setShowLabelManager(true)}>
-                        <i className="bi bi-tag-fill me-1"></i> Nhãn
+                    <button className="btn btn-sm btn-outline-secondary rounded-pill border-dashed ms-2" onClick={() => setShowLabelManager(true)}>
+                        <i className="bi bi-tags-fill me-1"></i>Nhãn
                     </button>
                 </div>
 
-                {/* Notes Grid/List */}
-                {notes.length === 0 ? (
-                    <div className="text-center py-5">
-                        <i className="bi bi-journal-x display-1 text-light"></i>
-                        <p className="text-muted mt-3">Không tìm thấy ghi chú nào.</p>
-                    </div>
-                ) : (
-                    <div className={viewMode === 'grid' ? 'row g-3' : 'd-flex flex-column gap-3'}>
-                        {notes.map(note => (
-                            <div key={note.id} className={viewMode === 'grid' ? 'col-sm-6 col-md-4 col-lg-3' : 'w-100'}>
-                                <div 
-                                    className={`card h-100 border-0 shadow-sm rounded-4 note-card transition-all ${note.is_pinned ? 'bg-primary-subtle' : 'bg-white'}`}
-                                    style={{ cursor: 'pointer' }}
-                                    onClick={() => openNote(note)}
-                                >
-                                    <div className="card-body">
-                                        <div className="d-flex justify-content-between align-items-start mb-2">
-                                            <h6 className="card-title fw-bold text-dark mb-0 text-truncate">{note.title || 'Ghi chú trống'}</h6>
-                                            <button 
-                                                className={`btn btn-sm p-0 ${note.is_pinned ? 'text-primary' : 'text-muted'}`}
-                                                onClick={(e) => { e.stopPropagation(); togglePin(note); }}
-                                            >
-                                                <i className={`bi ${note.is_pinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'}`}></i>
-                                            </button>
-                                        </div>
-                                        <p className="card-text text-muted small" style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                                            {note.content || 'Chưa có nội dung...'}
-                                        </p>
-                                        <div className="mt-auto pt-2">
-                                            {note.labels.map(l => (
-                                                <span key={l.id} className="badge rounded-pill bg-white text-primary border border-primary-subtle me-1 small">
-                                                    {l.name}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <div className="card-footer bg-transparent border-0 d-flex justify-content-between align-items-center pb-3">
-                                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>
-                                            {new Date(note.updated_at).toLocaleDateString('vi-VN')}
-                                        </small>
-                                        <button 
-                                            className="btn btn-sm text-danger opacity-50 hover-opacity-100" 
-                                            onClick={(e) => { e.stopPropagation(); confirmDelete(note); }}
-                                        >
-                                            <i className="bi bi-trash"></i>
+                {/* Content Area */}
+                <div className={viewMode === 'grid' ? 'row g-4' : 'd-flex flex-column gap-3'}>
+                    {notes.map(note => (
+                        <div key={note.id} className={viewMode === 'grid' ? 'col-sm-6 col-md-4 col-xl-3' : 'w-100'}>
+                            <div className={`card h-100 border shadow-sm rounded-4 note-card transition-all ${note.is_pinned ? 'border-primary border-2 bg-primary-subtle bg-opacity-10' : ''}`} onClick={() => openNote(note)}>
+                                <div className="card-body p-4">
+                                    <div className="d-flex justify-content-between align-items-start mb-3">
+                                        <h6 className="card-title fw-bold mb-0 text-truncate fs-5">{note.title || 'Ghi chú mới'}</h6>
+                                        <button className={`btn btn-sm p-0 border-0 ${note.is_pinned ? 'text-primary' : 'text-secondary opacity-25'}`} onClick={(e) => { e.stopPropagation(); togglePin(note); }}>
+                                            <i className={`bi ${note.is_pinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'} fs-5`}></i>
                                         </button>
                                     </div>
+                                    <p className="card-text opacity-75 mb-3" style={{ display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '1.5em' }}>
+                                        {note.content || 'Nhấn để thêm nội dung...'}
+                                    </p>
+                                    <div className="d-flex flex-wrap gap-1 mt-auto">
+                                        {note.labels.map(l => (
+                                            <span key={l.id} className="badge rounded-pill bg-body-secondary text-primary border border-primary-subtle fw-normal">#{l.name}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="card-footer bg-transparent border-top-0 d-flex justify-content-between align-items-center p-4 pt-0">
+                                    <span className="text-secondary opacity-50 small">
+                                        <i className="bi bi-calendar3 me-1"></i>
+                                        {new Date(note.updated_at).toLocaleDateString('vi-VN')}
+                                    </span>
+                                    <button className="btn btn-sm btn-link text-danger p-0 border-0 shadow-none opacity-25 hover-opacity-100" onClick={(e) => { e.stopPropagation(); confirmDelete(note); }}>
+                                        <i className="bi bi-trash3 fs-6"></i>
+                                    </button>
                                 </div>
                             </div>
-                        ))}
-                    </div>
-                )}
+                        </div>
+                    ))}
+                </div>
             </div>
 
             {/* Note Editor Modal */}
             {showModal && selectedNote && (
-                <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}>
-                    <div className="modal-dialog modal-lg modal-dialog-centered">
-                        <div className="modal-content border-0 shadow-lg rounded-4">
-                            <div className="modal-header border-0 pb-0">
-                                <div className="d-flex align-items-center gap-2">
-                                    <button 
-                                        className={`btn btn-sm rounded-pill ${selectedNote.is_pinned ? 'btn-primary' : 'btn-light border'}`} 
-                                        onClick={() => togglePin(selectedNote)}
-                                    >
-                                        <i className={`bi ${selectedNote.is_pinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'} me-1`}></i>
-                                        {selectedNote.is_pinned ? 'Đã ghim' : 'Ghim'}
+                <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', zIndex: 1060 }}>
+                    <div className="modal-dialog modal-xl modal-dialog-centered">
+                        <div className="modal-content border-0 shadow-2xl rounded-5 overflow-hidden bg-body">
+                            {/* Balanced Header */}
+                            <div className="modal-header border-0 px-4 pt-4 pb-0 d-flex justify-content-between align-items-center">
+                                <div className="d-flex align-items-center gap-3">
+                                    <button className={`btn rounded-pill px-4 btn-sm fw-bold transition-all ${selectedNote.is_pinned ? 'btn-primary shadow' : 'btn-outline-secondary'}`} onClick={() => togglePin(selectedNote)}>
+                                        <i className={`bi ${selectedNote.is_pinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'} me-2`}></i>
+                                        {selectedNote.is_pinned ? 'Ghi chú ưu tiên' : 'Ghim ưu tiên'}
                                     </button>
-                                    {isSaving && <span className="spinner-border spinner-border-sm text-muted" role="status"></span>}
-                                    {!isSaving && <small className="text-muted fst-italic">Đã lưu</small>}
-                                </div>
-                                <div className="d-flex gap-2">
-                                    <button className="btn btn-light btn-sm rounded-circle" onClick={() => confirmDelete(selectedNote)}>
-                                        <i className="bi bi-trash text-danger"></i>
-                                    </button>
-                                    <button type="button" className="btn-close" onClick={() => setShowModal(false)}></button>
-                                </div>
-                            </div>
-                            <div className="modal-body p-4 pt-2">
-                                <input 
-                                    type="text" 
-                                    className="form-control form-control-lg border-0 bg-transparent fw-bold mb-3 p-0 shadow-none fs-3" 
-                                    placeholder="Tiêu đề ghi chú" 
-                                    value={noteForm.title}
-                                    onChange={(e) => setNoteForm({ ...noteForm, title: e.target.value })}
-                                />
-                                <textarea 
-                                    className="form-control border-0 bg-transparent p-0 shadow-none fs-5" 
-                                    rows="8" 
-                                    placeholder="Nhập nội dung ghi chú ở đây..." 
-                                    style={{ resize: 'none' }}
-                                    value={noteForm.content}
-                                    onChange={(e) => setNoteForm({ ...noteForm, content: e.target.value })}
-                                ></textarea>
-                                
-                                {/* Images Section */}
-                                <div className="mt-4">
-                                    <h6 className="text-muted mb-3"><i className="bi bi-images me-2"></i>Hình ảnh</h6>
-                                    <div className="row g-2">
-                                        {selectedNote.images.map(img => (
-                                            <div key={img.id} className="col-4 col-md-3">
-                                                <div className="position-relative group shadow-sm rounded">
-                                                    <img src={`/storage/${img.path}`} className="img-fluid rounded" alt="note" />
-                                                </div>
-                                            </div>
-                                        ))}
-                                        <div className="col-4 col-md-3">
-                                            <label className="btn btn-light w-100 h-100 d-flex flex-column align-items-center justify-content-center border-dashed rounded-3" style={{ border: '2px dashed #dee2e6', minHeight: '100px', cursor: 'pointer' }}>
-                                                <i className="bi bi-plus-circle text-muted fs-4 mb-1"></i>
-                                                <span className="small text-muted">Thêm ảnh</span>
-                                                <input type="file" className="d-none" accept="image/*" onChange={handleImageUpload} />
-                                            </label>
-                                        </div>
+                                    <div className="d-flex align-items-center gap-2 small">
+                                        {isSaving ? (
+                                            <span className="text-secondary"><div className="spinner-border spinner-border-sm me-1"></div> Đang lưu...</span>
+                                        ) : (
+                                            <span className="text-success fw-medium"><i className="bi bi-check2-circle me-1"></i> Đã đồng bộ</span>
+                                        )}
                                     </div>
                                 </div>
+                                <button type="button" className="btn-close shadow-none" onClick={() => setShowModal(false)}></button>
+                            </div>
+                            
+                            <div className="modal-body p-4 p-lg-5 pt-3">
+                                <div className="row g-4">
+                                    {/* Left Side: Text content */}
+                                    <div className="col-lg-8 border-end-lg pe-lg-5">
+                                        <input 
+                                            type="text" 
+                                            className="form-control form-control-lg border-0 bg-transparent fw-bold mb-4 p-0 shadow-none fs-1 text-body" 
+                                            placeholder="Tiêu đề" 
+                                            value={noteForm.title}
+                                            onChange={(e) => setNoteForm({ ...noteForm, title: e.target.value })}
+                                        />
+                                        <textarea 
+                                            className="form-control border-0 bg-transparent p-0 shadow-none fs-4 text-body opacity-75" 
+                                            rows="12" 
+                                            placeholder="Nội dung..." 
+                                            style={{ resize: 'none' }}
+                                            value={noteForm.content}
+                                            onChange={(e) => setNoteForm({ ...noteForm, content: e.target.value })}
+                                        ></textarea>
+                                    </div>
 
-                                {/* Labels Section */}
-                                <div className="mt-4 border-top pt-3">
-                                    <h6 className="text-muted mb-3"><i className="bi bi-tags me-2"></i>Nhãn dán</h6>
-                                    <div className="d-flex flex-wrap gap-2">
-                                        {labels.map(label => (
-                                            <button 
-                                                key={label.id}
-                                                className={`btn btn-sm rounded-pill px-3 transition-all ${selectedNote.labels.some(l => l.id === label.id) ? 'btn-primary shadow-sm' : 'btn-light border'}`}
-                                                onClick={() => handleLabelSync(label)}
-                                            >
-                                                {label.name}
-                                            </button>
-                                        ))}
-                                        {labels.length === 0 && <small className="text-muted">Chưa có nhãn nào. Hãy tạo nhãn trước.</small>}
+                                    {/* Right Side: Sidebar */}
+                                    <div className="col-lg-4">
+                                        <div className="d-flex flex-column gap-5 h-100">
+                                            {/* Labels */}
+                                            <section>
+                                                <h6 className="fw-bold mb-3 d-flex align-items-center text-primary">
+                                                    <i className="bi bi-tags me-2"></i>Nhãn dán
+                                                </h6>
+                                                <div className="d-flex flex-wrap gap-2">
+                                                    {labels.map(label => (
+                                                        <button key={label.id} className={`btn btn-sm rounded-pill px-3 transition-all border ${selectedNote.labels.some(l => l.id === label.id) ? 'btn-primary shadow-sm' : 'btn-light'}`} onClick={() => handleLabelSync(label)}>
+                                                            #{label.name}
+                                                        </button>
+                                                    ))}
+                                                    <button className="btn btn-sm btn-outline-secondary rounded-pill border-dashed px-3" onClick={() => setShowLabelManager(true)}>
+                                                        <i className="bi bi-plus"></i>
+                                                    </button>
+                                                </div>
+                                            </section>
+
+                                            {/* Images */}
+                                            <section className="flex-grow-1">
+                                                <h6 className="fw-bold mb-3 d-flex align-items-center text-primary">
+                                                    <i className="bi bi-images me-2"></i>Hình ảnh
+                                                </h6>
+                                                <div className="row g-2 mb-3">
+                                                    {selectedNote.images.map(img => (
+                                                        <div key={img.id} className="col-4 position-relative image-manage-group">
+                                                            <div className="ratio ratio-1x1 rounded-3 overflow-hidden shadow-sm border bg-body-secondary cursor-zoom-in" onClick={() => setPreviewImage(`/storage/${img.path}`)}>
+                                                                <img src={`/storage/${img.path}`} className="object-fit-cover" alt="note" />
+                                                            </div>
+                                                            <div className="position-absolute top-0 end-0 m-1 d-flex flex-column gap-1 opacity-0 image-manage-actions transition-all">
+                                                                <button className="btn btn-danger btn-sm rounded-circle p-1" style={{ width: '24px', height: '24px', fontSize: '0.6rem' }} onClick={(e) => { e.stopPropagation(); handleDeleteImage(img.id); }}>
+                                                                    <i className="bi bi-trash"></i>
+                                                                </button>
+                                                                <label className="btn btn-primary btn-sm rounded-circle p-1" style={{ width: '24px', height: '24px', fontSize: '0.6rem', cursor: 'pointer' }} onClick={(e) => e.stopPropagation()}>
+                                                                    <i className="bi bi-arrow-repeat"></i>
+                                                                    <input type="file" className="d-none" accept="image/*" onChange={(e) => handleImageUpload(e, img.id)} />
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                    <div className="col-4">
+                                                        <label className="btn btn-body-secondary w-100 h-100 d-flex flex-column align-items-center justify-content-center border-dashed rounded-3 p-3 transition-all" style={{ border: '2px dashed #dee2e6', minHeight: '80px', cursor: 'pointer' }}>
+                                                            <i className="bi bi-plus-circle text-secondary opacity-50 fs-4"></i>
+                                                            <input type="file" className="d-none" accept="image/*" onChange={(e) => handleImageUpload(e)} />
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            </section>
+
+                                            {/* Action Zone */}
+                                            <div className="mt-auto pt-3 border-top">
+                                                <button className="btn btn-outline-danger w-100 rounded-pill fw-bold py-2 mb-3 shadow-none border-opacity-25" onClick={() => confirmDelete(selectedNote)}>
+                                                    <i className="bi bi-trash3 me-2"></i>Xóa ghi chú này
+                                                </button>
+                                                <div className="opacity-50 small px-2">
+                                                    <div className="d-flex justify-content-between mb-1">
+                                                        <span>Ngày tạo:</span>
+                                                        <span>{new Date(selectedNote.created_at).toLocaleDateString('vi-VN')}</span>
+                                                    </div>
+                                                    <div className="d-flex justify-content-between">
+                                                        <span>Cập nhật:</span>
+                                                        <span>{new Date(selectedNote.updated_at).toLocaleDateString('vi-VN')}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -344,34 +365,39 @@ export default function Dashboard({ notes: initialNotes, labels, filters }) {
                 </div>
             )}
 
-            <LabelManager 
-                show={showLabelManager} 
-                labels={labels} 
-                onClose={() => setShowLabelManager(false)} 
-            />
+            {/* Lightbox */}
+            {previewImage && (
+                <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 2000 }} onClick={() => setPreviewImage(null)}>
+                    <div className="modal-dialog modal-dialog-centered modal-xl">
+                        <div className="modal-content bg-transparent border-0 text-center">
+                            <img src={previewImage} className="img-fluid rounded shadow-lg max-vh-90 mx-auto" alt="Preview" />
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <LabelManager show={showLabelManager} labels={labels} onClose={() => setShowLabelManager(false)} />
 
             <ConfirmationModal 
                 show={showDeleteModal}
-                title="Xóa ghi chú?"
-                message="Ghi chú này sẽ bị xóa vĩnh viễn khỏi tài khoản của bạn. Bạn có chắc chắn không?"
+                title="Xác nhận xóa"
+                message="Dữ liệu ghi chú và hình ảnh sẽ bị xóa vĩnh viễn. Bạn chắc chắn chứ?"
                 onConfirm={handleDelete}
                 onCancel={() => setShowDeleteModal(false)}
             />
 
             <style dangerouslySetInnerHTML={{ __html: `
-                .note-card:hover {
-                    transform: translateY(-5px);
-                    box-shadow: 0 .5rem 1rem rgba(0,0,0,.15)!important;
-                }
-                .transition-all {
-                    transition: all 0.2s ease-in-out;
-                }
-                .scrollbar-hide::-webkit-scrollbar {
-                    display: none;
-                }
-                .cursor-pointer {
-                    cursor: pointer;
-                }
+                .note-card { background-color: var(--bs-body-bg); color: inherit; }
+                .note-card:hover { transform: translateY(-6px); box-shadow: 0 1rem 3rem rgba(0,0,0,.175)!important; }
+                .transition-all { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+                .scrollbar-hide::-webkit-scrollbar { display: none; }
+                .hover-opacity-100:hover { opacity: 1 !important; }
+                @media (min-width: 992px) { .border-end-lg { border-right: 1px solid var(--bs-border-color); } }
+                .border-dashed { border-style: dashed !important; }
+                .shadow-2xl { box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+                .image-manage-group:hover .image-manage-actions { opacity: 1 !important; }
+                .cursor-zoom-in { cursor: zoom-in; }
+                .max-vh-90 { max-height: 90vh; }
             `}} />
         </BootstrapLayout>
     );

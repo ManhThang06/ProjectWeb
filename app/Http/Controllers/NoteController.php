@@ -23,7 +23,7 @@ class NoteController extends Controller
             });
         }
 
-        if ($request->has('label_id')) {
+        if ($request->filled('label_id')) {
             $query->whereHas('labels', function($q) use ($request) {
                 $q->where('labels.id', $request->label_id);
             });
@@ -99,6 +99,40 @@ class NoteController extends Controller
 
         $path = $request->file('image')->store('notes', 'public');
         $note->images()->create(['path' => $path]);
+
+        return back();
+    }
+
+    public function deleteImage(NoteImage $image)
+    {
+        if ($image->note->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        Storage::disk('public')->delete($image->path);
+        $image->delete();
+
+        return back();
+    }
+
+    public function replaceImage(Request $request, NoteImage $image)
+    {
+        if ($image->note->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        $request->validate([
+            'image' => 'required|image|max:2048',
+        ]);
+
+        // Delete old physical file
+        Storage::disk('public')->delete($image->path);
+
+        // Store new file
+        $path = $request->file('image')->store('notes', 'public');
+        
+        // Update DB record
+        $image->update(['path' => $path]);
 
         return back();
     }
