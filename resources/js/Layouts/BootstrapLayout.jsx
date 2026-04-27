@@ -1,5 +1,6 @@
 import { Link, usePage } from '@inertiajs/react';
 import { useEffect } from 'react';
+import ActivationWarningBanner from '@/Components/ActivationWarningBanner';
 
 export default function BootstrapLayout({ children }) {
     const { auth } = usePage().props;
@@ -40,12 +41,7 @@ export default function BootstrapLayout({ children }) {
 
     return (
         <div className="min-vh-100 d-flex flex-column bg-body text-body transition-all">
-            {user && !user.is_active && (
-                <div className="alert alert-warning border-0 rounded-0 mb-0 py-2 text-center shadow-sm" style={{ zIndex: 1050 }}>
-                    <i className="bi bi-exclamation-triangle-fill me-2"></i>
-                    Tài khoản chưa kích hoạt. Vui lòng xác nhận email để bảo mật tài khoản.
-                </div>
-            )}
+            <ActivationWarningBanner />
 
             <nav className="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm sticky-top py-2">
                 <div className="container">
