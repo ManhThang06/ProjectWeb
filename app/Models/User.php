@@ -60,5 +60,15 @@ class User extends Authenticatable
     {
         return $this->hasMany(Label::class);
     }
+
+    /**
+     * Những ghi chú được người khác chia sẻ với người dùng này.
+     */
+    public function sharedNotes()
+    {
+        return $this->belongsToMany(Note::class, 'note_user')
+                    ->withPivot('permission')
+                    ->withTimestamps();
+    }
 }
 

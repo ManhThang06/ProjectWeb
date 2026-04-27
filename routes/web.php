@@ -38,6 +38,13 @@ Route::middleware(['auth'])->group(function () {
         return Inertia::render('Preferences');
     })->name('preferences');
     Route::patch('/preferences', [\App\Http\Controllers\UserPreferenceController::class, 'update'])->name('preferences.update');
+
+    // Advanced Note Management Routes
+    Route::get('/shared-notes', [\App\Http\Controllers\NoteShareController::class, 'sharedWithMe'])->name('notes.shared-with-me');
+    Route::post('/notes/{note}/share', [\App\Http\Controllers\NoteShareController::class, 'share'])->name('notes.share');
+    Route::patch('/notes/{note}/share/{user}', [\App\Http\Controllers\NoteShareController::class, 'updatePermission'])->name('notes.share.update');
+    Route::post('/notes/{note}/verify-password', [\App\Http\Controllers\NoteShareController::class, 'verifyPassword'])->name('notes.verify-password');
+    Route::post('/notes/{note}/password', [\App\Http\Controllers\NoteShareController::class, 'setPassword'])->name('notes.set-password');
 });
 
 require __DIR__.'/auth.php';

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Note;
 use App\Models\NoteImage;
+use App\Events\NoteUpdated;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -13,7 +14,8 @@ class NoteController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Auth::user()->notes()->with(['labels', 'images']);
+        // Ghi chú của tôi
+        $query = Auth::user()->notes()->with(['labels', 'images', 'sharedWith:id,display_name,email']);
 
         if ($request->has('search')) {
             $search = $request->search;
@@ -31,7 +33,11 @@ class NoteController extends Controller
 
         $notes = $query->orderBy('is_pinned', 'desc')
                       ->orderBy('updated_at', 'desc')
-                      ->get();
+                      ->get()
+                      ->map(function ($note) {
+                          $note->has_password = !empty($note->password);
+                          return $note;
+                      });
 
         return Inertia::render('Dashboard', [
             'notes' => $notes,
@@ -55,7 +61,14 @@ class NoteController extends Controller
 
     public function update(Request $request, Note $note)
     {
-        if ($note->user_id !== Auth::id()) {
+        // Kiểm tra quyền: Owner hoặc được Share với quyền Edit
+        $isOwner = $note->user_id === Auth::id();
+        $isSharedEditor = $note->sharedWith()
+                               ->where('users.id', Auth::id())
+                               ->where('permission', 'edit')
+                               ->exists();
+
+        if (!$isOwner && !$isSharedEditor) {
             abort(403);
         }
 
@@ -66,6 +79,9 @@ class NoteController extends Controller
         ]);
 
         $note->update($validated);
+
+        // Phát sự kiện WebSocket để cập nhật Real-time
+        broadcast(new NoteUpdated($note, Auth::id()))->toOthers();
 
         return response()->json($note->load(['labels', 'images']));
     }
