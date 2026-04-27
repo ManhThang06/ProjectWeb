@@ -7,8 +7,10 @@ import LabelManager from '@/Components/LabelManager';
 import NotePasswordModal from '@/Components/NotePasswordModal';
 import NoteShareModal from '@/Components/NoteShareModal';
 import axios from 'axios';
+import useSync from '@/Hooks/useSync';
+import { db } from '@/db';
 
-export default function Dashboard({ notes: initialNotes, labels, filters, auth }) {
+export default function Dashboard({ notes: initialNotes, labels, filters, auth, openedNote, errors }) {
     const [notes, setNotes] = useState(initialNotes);
     const [viewMode, setViewMode] = useState('grid');
     const [search, setSearch] = useState(filters.search || '');
@@ -34,14 +36,36 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth }
     const [showPasswordSettings, setShowPasswordSettings] = useState(false);
     const [passwordForm, setPasswordForm] = useState({ password: '', password_confirmation: '', current_password: '' });
 
+    const { isOnline, isSyncing, syncData, saveNote } = useSync();
+
     // Sync initial notes from props
     useEffect(() => {
-        setNotes(initialNotes);
+        const initLocalDB = async () => {
+            if (isOnline) {
+                // Refresh local DB with server data
+                await db.notes.clear();
+                for (const note of initialNotes) {
+                    await db.notes.put({ ...note, server_id: note.id, sync_status: 'synced' });
+                }
+            }
+            const localNotes = await db.notes.toArray();
+            setNotes(localNotes);
+        };
+        
+        initLocalDB();
+
         if (selectedNote) {
-            const updated = initialNotes.find(n => n.id === selectedNote.id);
+            const updated = initialNotes.find(n => n.id === (selectedNote.server_id || selectedNote.id));
             if (updated) setSelectedNote(updated);
         }
-    }, [initialNotes]);
+    }, [initialNotes, isOnline]);
+
+    // Auto-open note if requested from other pages
+    useEffect(() => {
+        if (openedNote) {
+            openNote(openedNote);
+        }
+    }, [openedNote?.id]);
 
     // REAL-TIME COLLABORATION (Laravel Echo)
     useEffect(() => {
@@ -81,10 +105,9 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth }
     const handleAutoSave = async (id, data) => {
         setIsSaving(true);
         try {
-            const response = await axios.patch(route('notes.update', id), data);
-            setNotes(prev => prev.map(n => n.id === id ? { ...n, ...response.data } : n));
-            const updated = { ...selectedNote, ...response.data };
-            setSelectedNote(updated);
+            const updatedNote = await saveNote(data, id);
+            setNotes(prev => prev.map(n => (n.server_id === id || n.id === id) ? { ...n, ...updatedNote } : n));
+            setSelectedNote(prev => ({ ...prev, ...updatedNote }));
         } catch (error) {
             console.error('Auto-save failed', error);
         } finally {
@@ -110,6 +133,16 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth }
         setShowPasswordSettings(false);
     };
 
+    const closeNote = () => {
+        setShowModal(false);
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('from') === 'shared') {
+            router.visit(route('notes.shared-with-me'));
+        } else if (params.get('open')) {
+            router.replace(route('dashboard'));
+        }
+    };
+
     const handlePasswordSuccess = (password) => {
         const note = pendingAction.note;
         if (pendingAction.type === 'open') {
@@ -126,8 +159,7 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth }
 
     const handleCreateNewNote = async () => {
         try {
-            const response = await axios.post(route('notes.store'), { title: '', content: '' });
-            const newNote = response.data;
+            const newNote = await saveNote({ title: '', content: '' });
             setNotes([newNote, ...notes]);
             setSelectedNote(newNote);
             setNoteForm({ title: '', content: '' });
@@ -147,13 +179,24 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth }
         setShowDeleteModal(true);
     };
 
-    const handleDelete = () => {
-        router.delete(route('notes.destroy', noteToDelete.id), {
-            onSuccess: () => {
-                setShowDeleteModal(false);
-                setShowModal(false);
-            }
-        });
+    const handleDelete = async () => {
+        const id = noteToDelete.server_id || noteToDelete.id;
+        
+        if (isOnline) {
+            router.delete(route('notes.destroy', id), {
+                onSuccess: async () => {
+                    await db.notes.delete(noteToDelete.id);
+                    setShowDeleteModal(false);
+                    setShowModal(false);
+                }
+            });
+        } else {
+            // Offline delete
+            await db.notes.update(noteToDelete.id, { sync_status: 'pending_delete' });
+            setNotes(prev => prev.filter(n => n.id !== noteToDelete.id));
+            setShowDeleteModal(false);
+            setShowModal(false);
+        }
     };
 
     const togglePin = (note) => {
@@ -233,6 +276,22 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth }
     return (
         <BootstrapLayout>
             <Head title="Quản lý ghi chú" />
+
+            {!isOnline && (
+                <div className="position-fixed top-0 start-50 translate-middle-x mt-2 z-3">
+                    <div className="badge rounded-pill bg-danger shadow-lg px-4 py-2 border border-2 border-white animate-pulse">
+                        <i className="bi bi-cloud-slash me-2"></i> Đang ngoại tuyến - Chế độ lưu cục bộ
+                    </div>
+                </div>
+            )}
+
+            {isSyncing && (
+                <div className="position-fixed bottom-0 end-0 m-4 z-3">
+                    <div className="badge rounded-pill bg-primary shadow-lg px-3 py-2 border border-2 border-white">
+                        <div className="spinner-border spinner-border-sm me-2" role="status"></div> Đang đồng bộ...
+                    </div>
+                </div>
+            )}
             
             <div className="container py-2">
                 <div className="row mb-5 align-items-center g-3">
@@ -318,7 +377,7 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth }
                                         {isSaving ? <span className="text-secondary"><div className="spinner-border spinner-border-sm me-1"></div> Đang lưu...</span> : <span className="text-success fw-medium"><i className="bi bi-check2-circle me-1"></i> Đã đồng bộ</span>}
                                     </div>
                                 </div>
-                                <button type="button" className="btn-close shadow-none" onClick={() => setShowModal(false)}></button>
+                                <button type="button" className="btn-close shadow-none" onClick={closeNote}></button>
                             </div>
                             
                             <div className="modal-body p-4 p-lg-5 pt-3">
@@ -330,33 +389,37 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth }
 
                                     <div className="col-lg-4">
                                         <div className="d-flex flex-column gap-4 h-100">
-                                            <section className="bg-light p-3 rounded-4 border">
-                                                <h6 className="fw-bold mb-3 d-flex align-items-center text-warning" onClick={() => setShowPasswordSettings(!showPasswordSettings)} style={{ cursor: 'pointer' }}>
-                                                    <i className={`bi ${selectedNote.has_password ? 'bi-shield-lock-fill' : 'bi-shield-lock'} me-2`}></i> Bảo mật ghi chú
-                                                    <i className={`bi bi-chevron-${showPasswordSettings ? 'up' : 'down'} ms-auto small`}></i>
-                                                </h6>
-                                                
-                                                {showPasswordSettings && (
-                                                    <form onSubmit={handlePasswordChange}>
-                                                        {selectedNote.has_password && (
+                                            {selectedNote.user_id === auth.user.id && (
+                                                <section className="bg-light p-3 rounded-4 border">
+                                                    <h6 className="fw-bold mb-3 d-flex align-items-center text-warning" onClick={() => setShowPasswordSettings(!showPasswordSettings)} style={{ cursor: 'pointer' }}>
+                                                        <i className={`bi ${selectedNote.has_password ? 'bi-shield-lock-fill' : 'bi-shield-lock'} me-2`}></i> Bảo mật ghi chú
+                                                        <i className={`bi bi-chevron-${showPasswordSettings ? 'up' : 'down'} ms-auto small`}></i>
+                                                    </h6>
+                                                    
+                                                    {showPasswordSettings && (
+                                                        <form onSubmit={handlePasswordChange}>
+                                                            {selectedNote.has_password && (
+                                                                <div className="mb-2">
+                                                                    <input type="password" placeholder="Mật khẩu hiện tại" className={`form-control form-control-sm rounded-pill ${errors.current_password ? 'is-invalid' : ''}`} value={passwordForm.current_password} onChange={(e) => setPasswordForm({...passwordForm, current_password: e.target.value})} required />
+                                                                    {errors.current_password && <div className="invalid-feedback ms-2">{errors.current_password}</div>}
+                                                                </div>
+                                                            )}
                                                             <div className="mb-2">
-                                                                <input type="password" placeholder="Mật khẩu hiện tại" className="form-control form-control-sm rounded-pill" value={passwordForm.current_password} onChange={(e) => setPasswordForm({...passwordForm, current_password: e.target.value})} required />
+                                                                <input type="password" placeholder="Mật khẩu mới" className={`form-control form-control-sm rounded-pill ${errors.password ? 'is-invalid' : ''}`} value={passwordForm.password} onChange={(e) => setPasswordForm({...passwordForm, password: e.target.value})} required />
+                                                                {errors.password && <div className="invalid-feedback ms-2">{errors.password}</div>}
                                                             </div>
-                                                        )}
-                                                        <div className="mb-2">
-                                                            <input type="password" placeholder="Mật khẩu mới" className="form-control form-control-sm rounded-pill" value={passwordForm.password} onChange={(e) => setPasswordForm({...passwordForm, password: e.target.value})} required />
-                                                        </div>
-                                                        <div className="mb-3">
-                                                            <input type="password" placeholder="Xác nhận mật khẩu" className="form-control form-control-sm rounded-pill" value={passwordForm.password_confirmation} onChange={(e) => setPasswordForm({...passwordForm, password_confirmation: e.target.value})} required />
-                                                        </div>
-                                                        <div className="d-flex gap-2">
-                                                            <button type="submit" className="btn btn-sm btn-primary rounded-pill px-3">Lưu</button>
-                                                            {selectedNote.has_password && <button type="button" className="btn btn-sm btn-outline-danger rounded-pill px-3" onClick={disablePassword}>Tắt khóa</button>}
-                                                        </div>
-                                                    </form>
-                                                )}
-                                                {!showPasswordSettings && selectedNote.has_password && <span className="badge bg-warning-subtle text-warning border border-warning-opacity-25 rounded-pill px-3">Đã đặt mật khẩu</span>}
-                                            </section>
+                                                            <div className="mb-3">
+                                                                <input type="password" placeholder="Xác nhận mật khẩu" className="form-control form-control-sm rounded-pill" value={passwordForm.password_confirmation} onChange={(e) => setPasswordForm({...passwordForm, password_confirmation: e.target.value})} required />
+                                                            </div>
+                                                            <div className="d-flex gap-2">
+                                                                <button type="submit" className="btn btn-sm btn-primary rounded-pill px-3">Lưu</button>
+                                                                {selectedNote.has_password && <button type="button" className="btn btn-sm btn-outline-danger rounded-pill px-3" onClick={disablePassword}>Tắt khóa</button>}
+                                                            </div>
+                                                        </form>
+                                                    )}
+                                                    {!showPasswordSettings && selectedNote.has_password && <span className="badge bg-warning-subtle text-warning border border-warning-opacity-25 rounded-pill px-3">Đã đặt mật khẩu</span>}
+                                                </section>
+                                            )}
 
                                             <section>
                                                 <h6 className="fw-bold mb-3 d-flex align-items-center text-primary"><i className="bi bi-tags me-2"></i>Nhãn dán</h6>
@@ -403,7 +466,7 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth }
                 </div>
             )}
 
-            <NotePasswordModal show={showPasswordModal} note={pendingAction?.note} onSuccess={handlePasswordSuccess} onCancel={() => { setShowPasswordModal(false); setPendingAction(null); }} />
+            <NotePasswordModal show={showPasswordModal} note={pendingAction?.note} onSuccess={handlePasswordSuccess} onCancel={() => { closeNote(); setPendingAction(null); }} />
             <NoteShareModal show={showShareModal} note={selectedNote} onClose={() => setShowShareModal(false)} />
             <Lightbox image={previewImage} onClose={() => setPreviewImage(null)} />
             <LabelManager show={showLabelManager} labels={labels} onClose={() => setShowLabelManager(false)} />
@@ -418,6 +481,12 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth }
                 .border-dashed { border-style: dashed !important; }
                 .image-manage-group:hover .image-manage-actions { opacity: 1 !important; }
                 .cursor-zoom-in { cursor: zoom-in; }
+                @keyframes pulse {
+                    0% { transform: scale(1); }
+                    50% { transform: scale(1.05); }
+                    100% { transform: scale(1); }
+                }
+                .animate-pulse { animation: pulse 2s infinite ease-in-out; }
             `}} />
         </BootstrapLayout>
     );

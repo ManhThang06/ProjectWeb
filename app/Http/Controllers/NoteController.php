@@ -14,8 +14,10 @@ class NoteController extends Controller
 {
     public function index(Request $request)
     {
+        $user = Auth::user();
+
         // Ghi chú của tôi
-        $query = Auth::user()->notes()->with(['labels', 'images', 'sharedWith:id,display_name,email']);
+        $query = $user->notes()->with(['labels', 'images', 'sharedWith:id,display_name,email']);
 
         if ($request->has('search')) {
             $search = $request->search;
@@ -39,10 +41,27 @@ class NoteController extends Controller
                           return $note;
                       });
 
+        $openedNote = null;
+        if ($request->filled('open')) {
+            $openedNote = Note::with(['labels', 'images', 'sharedWith:id,display_name,email', 'user:id,display_name,email'])
+                ->where(function($q) use ($user) {
+                    $q->where('user_id', $user->id)
+                      ->orWhereHas('sharedWith', function($sq) use ($user) {
+                          $sq->where('users.id', $user->id);
+                      });
+                })
+                ->find($request->open);
+            
+            if ($openedNote) {
+                $openedNote->has_password = !empty($openedNote->password);
+            }
+        }
+
         return Inertia::render('Dashboard', [
             'notes' => $notes,
-            'labels' => Auth::user()->labels()->get(),
-            'filters' => $request->only(['search', 'label_id'])
+            'labels' => $user->labels()->get(),
+            'filters' => $request->only(['search', 'label_id']),
+            'openedNote' => $openedNote
         ]);
     }
 
