@@ -18,6 +18,7 @@ export default function Dashboard({ notes: initialNotes, labels, filters }) {
     const [showLabelManager, setShowLabelManager] = useState(false);
     const [noteToDelete, setNoteToDelete] = useState(null);
     const [previewImage, setPreviewImage] = useState(null);
+    const [quickLabelName, setQuickLabelName] = useState('');
 
     const [noteForm, setNoteForm] = useState({ title: '', content: '' });
     const debouncedNoteForm = useDebounce(noteForm, 300);
@@ -151,6 +152,22 @@ export default function Dashboard({ notes: initialNotes, labels, filters }) {
         });
     };
 
+    const handleQuickAddLabel = (e) => {
+        e.preventDefault();
+        if (!quickLabelName.trim()) return;
+
+        router.post(route('labels.store'), { name: quickLabelName }, {
+            onSuccess: (page) => {
+                // Find the newly created label
+                const newLabel = page.props.labels.find(l => l.name === quickLabelName);
+                if (newLabel) {
+                    handleLabelSync(newLabel);
+                }
+                setQuickLabelName('');
+            }
+        });
+    };
+
     return (
         <BootstrapLayout>
             <Head title="Quản lý ghi chú" />
@@ -205,7 +222,7 @@ export default function Dashboard({ notes: initialNotes, labels, filters }) {
                         </button>
                     ))}
                     <button className="btn btn-sm btn-outline-secondary rounded-pill border-dashed ms-2" onClick={() => setShowLabelManager(true)}>
-                        <i className="bi bi-tags-fill me-1"></i>Nhãn
+                        <i className="bi bi-tags-fill me-1"></i>Quản lý nhãn
                     </button>
                 </div>
 
@@ -255,7 +272,7 @@ export default function Dashboard({ notes: initialNotes, labels, filters }) {
                                 <div className="d-flex align-items-center gap-3">
                                     <button className={`btn rounded-pill px-4 btn-sm fw-bold transition-all ${selectedNote.is_pinned ? 'btn-primary shadow' : 'btn-outline-secondary'}`} onClick={() => togglePin(selectedNote)}>
                                         <i className={`bi ${selectedNote.is_pinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'} me-2`}></i>
-                                        {selectedNote.is_pinned ? 'Ghi chú ưu tiên' : 'Ghim ưu tiên'}
+                                        {selectedNote.is_pinned ? 'Đã ghim' : 'Ghim'}
                                     </button>
                                     <div className="d-flex align-items-center gap-2 small">
                                         {isSaving ? (
@@ -292,21 +309,38 @@ export default function Dashboard({ notes: initialNotes, labels, filters }) {
                                     {/* Right Side: Sidebar */}
                                     <div className="col-lg-4">
                                         <div className="d-flex flex-column gap-5 h-100">
-                                            {/* Labels */}
+                                            {/* Labels Section */}
                                             <section>
                                                 <h6 className="fw-bold mb-3 d-flex align-items-center text-primary">
                                                     <i className="bi bi-tags me-2"></i>Nhãn dán
                                                 </h6>
-                                                <div className="d-flex flex-wrap gap-2">
+                                                
+                                                {/* QUICK ADD LABEL FORM */}
+                                                <form onSubmit={handleQuickAddLabel} className="mb-3">
+                                                    <div className="input-group input-group-sm shadow-sm rounded-pill overflow-hidden border">
+                                                        <input 
+                                                            type="text" 
+                                                            className="form-control border-0 bg-transparent shadow-none" 
+                                                            placeholder="Tạo nhãn mới & gán..." 
+                                                            value={quickLabelName}
+                                                            onChange={(e) => setQuickLabelName(e.target.value)}
+                                                        />
+                                                        <button className="btn btn-primary border-0" type="submit">
+                                                            <i className="bi bi-plus"></i>
+                                                        </button>
+                                                    </div>
+                                                </form>
+
+                                                <div className="d-flex flex-wrap gap-2 mb-3">
                                                     {labels.map(label => (
                                                         <button key={label.id} className={`btn btn-sm rounded-pill px-3 transition-all border ${selectedNote.labels.some(l => l.id === label.id) ? 'btn-primary shadow-sm' : 'btn-light'}`} onClick={() => handleLabelSync(label)}>
                                                             #{label.name}
                                                         </button>
                                                     ))}
-                                                    <button className="btn btn-sm btn-outline-secondary rounded-pill border-dashed px-3" onClick={() => setShowLabelManager(true)}>
-                                                        <i className="bi bi-plus"></i>
-                                                    </button>
                                                 </div>
+                                                <button className="btn btn-sm btn-link text-secondary p-0 small text-decoration-none" onClick={() => setShowLabelManager(true)}>
+                                                    <i className="bi bi-gear me-1"></i>Quản lý tất cả nhãn
+                                                </button>
                                             </section>
 
                                             {/* Images */}
@@ -367,7 +401,7 @@ export default function Dashboard({ notes: initialNotes, labels, filters }) {
 
             {/* Lightbox */}
             {previewImage && (
-                <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 2000 }} onClick={() => setPreviewImage(null)}>
+                <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 1090 }} onClick={() => setPreviewImage(null)}>
                     <div className="modal-dialog modal-dialog-centered modal-xl">
                         <div className="modal-content bg-transparent border-0 text-center">
                             <img src={previewImage} className="img-fluid rounded shadow-lg max-vh-90 mx-auto" alt="Preview" />

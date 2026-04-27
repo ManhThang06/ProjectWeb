@@ -4,7 +4,7 @@ export default function ConfirmationModal({ show, onConfirm, onCancel, title, me
     if (!show) return null;
 
     return (
-        <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+        <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1080 }}>
             <div className="modal-dialog modal-dialog-centered">
                 <div className="modal-content border-0 shadow">
                     <div className="modal-header border-0">
