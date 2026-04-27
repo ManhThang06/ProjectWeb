@@ -54,8 +54,10 @@ export default function Login({ status, canResetPassword }) {
                                 <div className="mb-3 form-check">
                                     <input
                                         type="checkbox"
+                                        name="remember"
                                         className="form-check-input"
                                         id="remember"
+                                        value="1"
                                         checked={data.remember}
                                         onChange={(e) => setData('remember', e.target.checked)}
                                     />
