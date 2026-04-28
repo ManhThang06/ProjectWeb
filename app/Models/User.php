@@ -8,7 +8,10 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-class User extends Authenticatable
+use Illuminate\Support\Facades\URL;
+use App\Services\MailService;
+
+class User extends Authenticatable implements MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
@@ -70,6 +73,29 @@ class User extends Authenticatable
         return $this->belongsToMany(Note::class, 'note_user')
                     ->withPivot('permission')
                     ->withTimestamps();
+    }
+
+    /**
+     * Gửi thông báo xác thực email sử dụng PHPMailer.
+     */
+    public function sendEmailVerificationNotification()
+    {
+        $verificationUrl = URL::temporarySignedRoute(
+            'verification.verify',
+            now()->addMinutes(60),
+            ['id' => $this->id, 'hash' => sha1($this->email)]
+        );
+
+        $emailContent = view('emails.verify-account', [
+            'url' => $verificationUrl,
+            'displayName' => $this->display_name
+        ])->render();
+
+        MailService::sendEmail(
+            $this->email,
+            'Kích hoạt tài khoản của bạn - PJWEB',
+            $emailContent
+        );
     }
 }
 
