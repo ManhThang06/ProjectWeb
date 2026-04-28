@@ -30,14 +30,11 @@ Route::middleware(['auth'])->group(function () {
     Route::patch('/labels/{label}', [\App\Http\Controllers\LabelController::class, 'update'])->name('labels.update');
     Route::delete('/labels/{label}', [\App\Http\Controllers\LabelController::class, 'destroy'])->name('labels.destroy');
 
-    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
-    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
-    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
-    
-    Route::get('/preferences', function () {
-        return Inertia::render('Preferences');
-    })->name('preferences');
-    Route::patch('/preferences', [\App\Http\Controllers\UserPreferenceController::class, 'update'])->name('preferences.update');
+    // Settings & Profile
+    Route::get('/settings', [ProfileController::class, 'edit'])->name('settings.edit');
+    Route::post('/settings/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::post('/settings/password', [ProfileController::class, 'updatePassword'])->name('profile.password.update');
+    Route::patch('/settings/preferences', [\App\Http\Controllers\UserPreferenceController::class, 'update'])->name('preferences.update');
 
     // Advanced Note Management Routes
     Route::get('/shared-notes', [\App\Http\Controllers\NoteShareController::class, 'sharedWithMe'])->name('notes.shared-with-me');

@@ -62,7 +62,14 @@ export default function BootstrapLayout({ children }) {
                                         <Link className={`nav-link px-3 rounded-pill ${route().current('dashboard') ? 'active bg-white bg-opacity-10' : ''}`} href={route('dashboard')}>Ghi chú</Link>
                                     </li>
                                     <li className="nav-item">
-                                        <Link className={`nav-link px-3 rounded-pill ${route().current('preferences') ? 'active bg-white bg-opacity-10' : ''}`} href={route('preferences')}>Cài đặt</Link>
+                                        <Link className={`nav-link px-3 rounded-pill ${route().current('settings.edit') ? 'active bg-white bg-opacity-10' : ''}`} href={route('settings.edit')}>
+                                            {user.avatar ? (
+                                                <img src={`/storage/${user.avatar}`} className="rounded-circle me-1" style={{ width: '20px', height: '20px', objectFit: 'cover' }} />
+                                            ) : (
+                                                <i className="bi bi-gear-fill me-1"></i>
+                                            )}
+                                            Cài đặt
+                                        </Link>
                                     </li>
                                     <li className="nav-item ms-lg-2">
                                         <Link className="btn btn-outline-light btn-sm rounded-pill px-4 fw-bold border-2" href={route('logout')} method="post" as="button">
