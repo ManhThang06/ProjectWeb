@@ -1,16 +1,18 @@
 import BootstrapLayout from '@/Layouts/BootstrapLayout';
-import { Head, useForm, usePage } from '@inertiajs/react';
+import { Head, useForm, usePage, router } from '@inertiajs/react';
 import { useState, useRef } from 'react';
+import axios from 'axios';
 
 export default function Settings({ status }) {
     const { auth } = usePage().props;
     const [activeTab, setActiveTab] = useState('account');
     const avatarInput = useRef();
+    const [avatarPreview, setAvatarPreview] = useState(null);
+    const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
     // Account Form
     const accountForm = useForm({
         display_name: auth.user.display_name || '',
-        avatar: null,
     });
 
     // Password Form
@@ -34,12 +36,28 @@ export default function Settings({ status }) {
         text_color: preferences.text_color || (preferences.theme === 'dark' ? '#ffffff' : '#000000'),
     });
 
-    const updateAccount = (e) => {
+    const updateAccount = async (e) => {
         e.preventDefault();
-        accountForm.post(route('profile.update'), {
-            forceFormData: true,
-            preserveScroll: true,
-        });
+        const formData = new FormData();
+        formData.append('display_name', accountForm.data.display_name);
+        if (accountForm.data.avatar) {
+            formData.append('avatar', accountForm.data.avatar);
+        }
+        // Thêm _method=POST để route nhận đúng
+        formData.append('_method', 'POST');
+
+        setIsUploadingAvatar(true);
+        try {
+            await axios.post(route('profile.update'), formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            // Reload lại trang để cập nhật thông tin mới
+            router.reload({ only: ['auth'] });
+        } catch (err) {
+            console.error('Cập nhật thất bại', err);
+        } finally {
+            setIsUploadingAvatar(false);
+        }
     };
 
     const updatePassword = (e) => {
@@ -111,7 +129,7 @@ export default function Settings({ status }) {
                                             <div className="text-center mb-5">
                                                 <div className="position-relative d-inline-block">
                                                     <img 
-                                                        src={auth.user.avatar ? `/storage/${auth.user.avatar}` : `https://ui-avatars.com/api/?name=${auth.user.display_name}&background=random&size=128`} 
+                                                        src={avatarPreview || (auth.user.avatar ? `/storage/${auth.user.avatar}` : `https://ui-avatars.com/api/?name=${auth.user.display_name}&background=random&size=128`)} 
                                                         alt="Avatar" 
                                                         className="rounded-circle shadow-sm border border-4 border-white"
                                                         style={{ width: '120px', height: '120px', objectFit: 'cover' }}
@@ -129,7 +147,13 @@ export default function Settings({ status }) {
                                                     ref={avatarInput} 
                                                     className="d-none" 
                                                     accept="image/*"
-                                                    onChange={(e) => accountForm.setData('avatar', e.target.files[0])}
+                                                    onChange={(e) => {
+                                                        const file = e.target.files[0];
+                                                        if (file) {
+                                                            accountForm.setData('avatar', file);
+                                                            setAvatarPreview(URL.createObjectURL(file));
+                                                        }
+                                                    }}
                                                 />
                                                 <h5 className="mt-3 fw-bold">{auth.user.display_name}</h5>
                                                 {accountForm.data.avatar && <div className="text-primary small mt-1">Đã chọn file: {accountForm.data.avatar.name}</div>}
@@ -146,8 +170,8 @@ export default function Settings({ status }) {
                                                 {accountForm.errors.display_name && <div className="invalid-feedback">{accountForm.errors.display_name}</div>}
                                             </div>
 
-                                            <button type="submit" className="btn btn-primary px-4 py-2 rounded-pill fw-bold" disabled={accountForm.processing}>
-                                                Lưu thay đổi
+                                            <button type="submit" className="btn btn-primary px-4 py-2 rounded-pill fw-bold" disabled={isUploadingAvatar}>
+                                                {isUploadingAvatar ? <><span className="spinner-border spinner-border-sm me-2"></span>Đang lưu...</> : 'Lưu thay đổi'}
                                             </button>
                                         </form>
                                     </div>

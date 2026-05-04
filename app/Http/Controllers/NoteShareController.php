@@ -14,11 +14,27 @@ class NoteShareController extends Controller
     /**
      * Hiển thị danh sách ghi chú được chia sẻ với tôi.
      */
-    public function sharedWithMe()
+    public function sharedWithMe(Request $request)
     {
-        $notes = Auth::user()->sharedNotes()
-            ->with(['user:id,display_name,email'])
-            ->get()
+        $user = Auth::user();
+        $query = $user->sharedNotes()
+            ->with(['user:id,display_name,email', 'labels', 'images']);
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                  ->orWhere('content', 'like', "%{$search}%");
+            });
+        }
+
+        if ($request->filled('label_id')) {
+            $query->whereHas('labels', function($q) use ($request) {
+                $q->where('labels.id', $request->label_id);
+            });
+        }
+
+        $notes = $query->get()
             ->map(function ($note) {
                 return [
                     'id' => $note->id,
@@ -29,11 +45,36 @@ class NoteShareController extends Controller
                     'permission' => $note->pivot->permission,
                     'shared_at' => $note->pivot->created_at,
                     'is_pinned' => $note->is_pinned,
+                    'labels' => $note->labels,
+                    'images' => $note->images,
+                    'has_password' => !empty($note->password),
                 ];
             });
 
+        $openedNote = null;
+        if ($request->filled('open')) {
+            $openedNote = Note::with(['labels', 'images', 'sharedWith:id,display_name,email', 'user:id,display_name,email'])
+                ->whereHas('sharedWith', function($sq) use ($user) {
+                    $sq->where('users.id', $user->id);
+                })
+                ->find($request->open);
+            
+            if ($openedNote) {
+                $openedNote->has_password = !empty($openedNote->password);
+                // Gán permission cho openedNote
+                $pivot = $openedNote->sharedWith()->where('users.id', $user->id)->first()->pivot;
+                $openedNote->permission = $pivot->permission;
+            }
+        }
+
         return Inertia::render('SharedNotes', [
-            'notes' => $notes
+            'notes' => $notes,
+            'openedNote' => $openedNote,
+            'labels' => $user->labels()->get(),
+            'filters' => $request->only(['search', 'label_id']),
+            'auth' => [
+                'user' => $user
+            ]
         ]);
     }
 

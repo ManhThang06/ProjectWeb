@@ -40,29 +40,30 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
 
     // Sync initial notes from props
     useEffect(() => {
-        const initLocalDB = async () => {
-            if (isOnline) {
-                // Refresh local DB with server data
-                await db.notes.clear();
-                for (const note of initialNotes) {
-                    await db.notes.put({ ...note, server_id: note.id, sync_status: 'synced' });
-                }
-            }
-            const localNotes = await db.notes.toArray();
-            setNotes(localNotes);
-        };
-        
-        initLocalDB();
+        // Khi server trả về danh sách notes mới, merge vào UI state
+        // Giữ lại các ghi chú tạm (temp_xxx) không có trên server
+        setNotes(prev => {
+            const tempNotes = prev.filter(n => String(n.id).startsWith('temp_'));
+            const serverNotes = initialNotes.map(n => ({
+                ...n,
+                server_id: n.id,
+                sync_status: 'synced',
+                images: n.images || [],
+                labels: n.labels || [],
+            }));
+            // Ghép: server notes trước, rồi temp notes chưa lưu
+            return [...serverNotes, ...tempNotes];
+        });
 
         if (selectedNote) {
             const updated = initialNotes.find(n => n.id === (selectedNote.server_id || selectedNote.id));
-            if (updated) setSelectedNote(updated);
+            if (updated) setSelectedNote(prev => ({ ...prev, ...updated, images: updated.images || [], labels: updated.labels || [] }));
         }
-    }, [initialNotes, isOnline]);
+    }, [initialNotes]);
 
     // Auto-open note if requested from other pages
     useEffect(() => {
-        if (openedNote) {
+        if (openedNote && !showModal && !showPasswordModal && (!selectedNote || selectedNote.id !== openedNote.id)) {
             openNote(openedNote);
         }
     }, [openedNote?.id]);
@@ -97,16 +98,43 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
     }, [debouncedSearch]);
 
     useEffect(() => {
-        if (selectedNote && !selectedNote.has_password && (debouncedNoteForm.title !== selectedNote.title || debouncedNoteForm.content !== selectedNote.content)) {
-            handleAutoSave(selectedNote.id, debouncedNoteForm);
+        if (!selectedNote || selectedNote.has_password) return;
+        const titleChanged = debouncedNoteForm.title !== (selectedNote.title || '');
+        const contentChanged = debouncedNoteForm.content !== (selectedNote.content || '');
+        if (titleChanged || contentChanged) {
+            handleAutoSave(selectedNote, debouncedNoteForm);
         }
     }, [debouncedNoteForm]);
 
-    const handleAutoSave = async (id, data) => {
+    const handleAutoSave = async (note, data) => {
         setIsSaving(true);
         try {
-            const updatedNote = await saveNote(data, id);
-            setNotes(prev => prev.map(n => (n.server_id === id || n.id === id) ? { ...n, ...updatedNote } : n));
+            let updatedNote;
+            // Nếu là ghi chú tạm (chưa lên server), chỉ lưu khi có nội dung thực
+            const hasContent = data.title?.trim() || data.content?.trim();
+            if (!note.server_id && String(note.id).startsWith('temp_')) {
+                if (!hasContent) {
+                    setIsSaving(false);
+                    return; // Không lưu ghi chú rỗng lên server
+                }
+                // Lần đầu có nội dung -> tạo mới trên server
+                const res = await axios.post(route('notes.store'), data);
+                updatedNote = { 
+                    ...res.data, 
+                    server_id: res.data.id, 
+                    sync_status: 'synced',
+                    images: note.images || [],
+                    labels: res.data.labels || [],
+                };
+            } else {
+                updatedNote = await saveNote(data, note.server_id || note.id);
+                updatedNote = { ...updatedNote, images: note.images || [], labels: note.labels || [] };
+            }
+            // Thay thế ghi chú tạm bằng ghi chú thật trong state
+            setNotes(prev => prev.map(n => (n.id === note.id || n.server_id === (note.server_id || note.id)) 
+                ? { ...n, ...updatedNote } 
+                : n
+            ));
             setSelectedNote(prev => ({ ...prev, ...updatedNote }));
         } catch (error) {
             console.error('Auto-save failed', error);
@@ -135,9 +163,21 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
 
     const closeNote = () => {
         setShowModal(false);
+        setSelectedNote(null);
+
+        // Nếu đóng một ghi chú tạm (chưa lên server) và nó vẫn rỗng -> xóa khỏi state
+        if (selectedNote && String(selectedNote.id).startsWith('temp_')) {
+            const isEmpty = !noteForm.title?.trim() && !noteForm.content?.trim() && (!selectedNote.images || selectedNote.images.length === 0);
+            if (isEmpty) {
+                setNotes(prev => prev.filter(n => n.id !== selectedNote.id));
+            }
+        }
+
         const params = new URLSearchParams(window.location.search);
-        if (params.get('from') === 'shared') {
-            router.visit(route('notes.shared-with-me'));
+        const fromSource = filters.from || params.get('from');
+
+        if (fromSource === 'shared') {
+            router.get(route('notes.shared-with-me'));
         } else if (params.get('open')) {
             router.replace(route('dashboard'));
         }
@@ -157,16 +197,26 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
         setPendingAction(null);
     };
 
-    const handleCreateNewNote = async () => {
-        try {
-            const newNote = await saveNote({ title: '', content: '' });
-            setNotes([newNote, ...notes]);
-            setSelectedNote(newNote);
-            setNoteForm({ title: '', content: '' });
-            setShowModal(true);
-        } catch (error) {
-            console.error('Failed to create note', error);
-        }
+    const handleCreateNewNote = () => {
+        // KHÔNG tạo ghi chú trên server ngay - chỉ tạo ghi chú tạm cục bộ
+        // để tránh "ghi chú ma" (ghi chú rỗng xuất hiện 0.3s rồi biến mất)
+        const tempNote = {
+            id: `temp_${Date.now()}`,
+            server_id: null,
+            title: '',
+            content: '',
+            images: [],
+            labels: [],
+            is_pinned: false,
+            has_password: false,
+            user_id: auth.user.id,
+            updated_at: new Date().toISOString(),
+            sync_status: 'pending_create',
+        };
+        setNotes(prev => [tempNote, ...prev]);
+        setSelectedNote(tempNote);
+        setNoteForm({ title: '', content: '' });
+        setShowModal(true);
     };
 
     const confirmDelete = (note) => {
@@ -180,19 +230,26 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
     };
 
     const handleDelete = async () => {
+        // Nếu là ghi chú tạm (chưa lên server) -> xóa khỏi state là xong
+        if (!noteToDelete.server_id && String(noteToDelete.id).startsWith('temp_')) {
+            setNotes(prev => prev.filter(n => n.id !== noteToDelete.id));
+            setShowDeleteModal(false);
+            setShowModal(false);
+            return;
+        }
+
         const id = noteToDelete.server_id || noteToDelete.id;
         
         if (isOnline) {
             router.delete(route('notes.destroy', id), {
-                onSuccess: async () => {
-                    await db.notes.delete(noteToDelete.id);
+                onSuccess: () => {
+                    setNotes(prev => prev.filter(n => n.id !== noteToDelete.id && n.server_id !== id));
                     setShowDeleteModal(false);
                     setShowModal(false);
                 }
             });
         } else {
             // Offline delete
-            await db.notes.update(noteToDelete.id, { sync_status: 'pending_delete' });
             setNotes(prev => prev.filter(n => n.id !== noteToDelete.id));
             setShowDeleteModal(false);
             setShowModal(false);
@@ -224,20 +281,60 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
         }
     };
 
-    const handleImageUpload = (e, replaceId = null) => {
+    const handleImageUpload = async (e, replaceId = null) => {
         const file = e.target.files[0];
         if (!file) return;
+
         const formData = new FormData();
         formData.append('image', file);
+
         if (replaceId) {
             router.post(route('notes.image.replace', replaceId), formData, {
                 onSuccess: () => router.reload({ only: ['notes'] })
             });
-        } else {
-            router.post(route('notes.image', selectedNote.id), formData, {
-                onSuccess: () => router.reload({ only: ['notes'] })
-            });
+            return;
         }
+
+        // Nếu ghi chú chưa có server_id (ghi chú tạm) -> lưu lên server trước
+        let noteId = selectedNote.server_id || selectedNote.id;
+        if (!selectedNote.server_id && String(selectedNote.id).startsWith('temp_')) {
+            try {
+                setIsSaving(true);
+                // Lấy tên file làm tiêu đề nếu ghi chú chưa có tiêu đề
+                const autoTitle = (!noteForm.title || noteForm.title.trim() === '') 
+                    ? file.name.replace(/\.[^/.]+$/, '') // bỏ phần extension
+                    : noteForm.title;
+
+                const res = await axios.post(route('notes.store'), {
+                    title: autoTitle,
+                    content: noteForm.content || '',
+                });
+                const savedNote = res.data;
+                noteId = savedNote.id;
+
+                // Cập nhật state với note đã được lưu
+                const updatedNote = { 
+                    ...savedNote, 
+                    server_id: savedNote.id, 
+                    sync_status: 'synced',
+                    images: [],
+                    labels: savedNote.labels || [],
+                };
+                setSelectedNote(updatedNote);
+                setNoteForm(prev => ({ ...prev, title: autoTitle }));
+                setNotes(prev => prev.map(n => n.id === selectedNote.id ? updatedNote : n));
+            } catch (err) {
+                console.error('Failed to save note before image upload', err);
+                setIsSaving(false);
+                return;
+            } finally {
+                setIsSaving(false);
+            }
+        }
+
+        router.post(route('notes.image', noteId), formData, {
+            onSuccess: () => router.reload({ only: ['notes'] })
+        });
     };
 
     const handleDeleteImage = (imgId) => {

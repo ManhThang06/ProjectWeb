@@ -60,7 +60,7 @@ class NoteController extends Controller
         return Inertia::render('Dashboard', [
             'notes' => $notes,
             'labels' => $user->labels()->get(),
-            'filters' => $request->only(['search', 'label_id']),
+            'filters' => $request->only(['search', 'label_id', 'from']),
             'openedNote' => $openedNote
         ]);
     }
@@ -125,7 +125,13 @@ class NoteController extends Controller
 
     public function uploadImage(Request $request, Note $note)
     {
-        if ($note->user_id !== Auth::id()) {
+        $isOwner = $note->user_id === Auth::id();
+        $isSharedEditor = $note->sharedWith()
+                               ->where('users.id', Auth::id())
+                               ->where('permission', 'edit')
+                               ->exists();
+
+        if (!$isOwner && !$isSharedEditor) {
             abort(403);
         }
         $request->validate([
@@ -140,7 +146,14 @@ class NoteController extends Controller
 
     public function deleteImage(NoteImage $image)
     {
-        if ($image->note->user_id !== Auth::id()) {
+        $note = $image->note;
+        $isOwner = $note->user_id === Auth::id();
+        $isSharedEditor = $note->sharedWith()
+                               ->where('users.id', Auth::id())
+                               ->where('permission', 'edit')
+                               ->exists();
+
+        if (!$isOwner && !$isSharedEditor) {
             abort(403);
         }
 
@@ -152,7 +165,14 @@ class NoteController extends Controller
 
     public function replaceImage(Request $request, NoteImage $image)
     {
-        if ($image->note->user_id !== Auth::id()) {
+        $note = $image->note;
+        $isOwner = $note->user_id === Auth::id();
+        $isSharedEditor = $note->sharedWith()
+                               ->where('users.id', Auth::id())
+                               ->where('permission', 'edit')
+                               ->exists();
+
+        if (!$isOwner && !$isSharedEditor) {
             abort(403);
         }
 
@@ -174,7 +194,13 @@ class NoteController extends Controller
 
     public function syncLabels(Request $request, Note $note)
     {
-        if ($note->user_id !== Auth::id()) {
+        $isOwner = $note->user_id === Auth::id();
+        $isSharedEditor = $note->sharedWith()
+                               ->where('users.id', Auth::id())
+                               ->where('permission', 'edit')
+                               ->exists();
+
+        if (!$isOwner && !$isSharedEditor) {
             abort(403);
         }
         $request->validate([
