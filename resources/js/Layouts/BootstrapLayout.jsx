@@ -1,10 +1,39 @@
 import { Link, usePage } from '@inertiajs/react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import ActivationWarningBanner from '@/Components/ActivationWarningBanner';
 
 export default function BootstrapLayout({ children }) {
     const { auth } = usePage().props;
     const user = auth?.user;
+
+    // --- Tab Animation Logic ---
+    // For Guests
+    const guestTab = route().current('register') ? 'register' : 'login';
+    const [guestSliderPos, setGuestSliderPos] = useState(() => {
+        const last = sessionStorage.getItem('last_guest_tab');
+        return last === 'register' ? 'calc(50%)' : '4px';
+    });
+
+    // For Auth Users
+    const authTab = route().current('settings.edit') ? 'settings' : 'dashboard';
+    const [authSliderPos, setAuthSliderPos] = useState(() => {
+        const last = sessionStorage.getItem('last_auth_tab');
+        return last === 'settings' ? 'calc(50%)' : '4px';
+    });
+
+    useEffect(() => {
+        // Animation delay to ensure mount is complete
+        const timer = setTimeout(() => {
+            setGuestSliderPos(guestTab === 'register' ? 'calc(50%)' : '4px');
+            setAuthSliderPos(authTab === 'settings' ? 'calc(50%)' : '4px');
+        }, 50);
+
+        sessionStorage.setItem('last_guest_tab', guestTab);
+        sessionStorage.setItem('last_auth_tab', authTab);
+
+        return () => clearTimeout(timer);
+    }, [guestTab, authTab]);
+    // ----------------------------
     
     // Default preferences
     const preferences = user?.preferences || { 
@@ -57,35 +86,72 @@ export default function BootstrapLayout({ children }) {
                     <div className="collapse navbar-collapse" id="navbarNav">
                         <ul className="navbar-nav ms-auto align-items-center gap-1">
                             {user ? (
-                                <>
-                                    <li className="nav-item">
-                                        <Link className={`nav-link px-3 rounded-pill ${route().current('dashboard') ? 'active bg-white bg-opacity-10' : ''}`} href={route('dashboard')}>Ghi chú</Link>
-                                    </li>
-                                    <li className="nav-item">
-                                        <Link className={`nav-link px-3 rounded-pill ${route().current('settings.edit') ? 'active bg-white bg-opacity-10' : ''}`} href={route('settings.edit')}>
-                                            {user.avatar ? (
-                                                <img src={`/storage/${user.avatar}`} className="rounded-circle me-1" style={{ width: '20px', height: '20px', objectFit: 'cover' }} />
-                                            ) : (
-                                                <i className="bi bi-gear-fill me-1"></i>
-                                            )}
-                                            Cài đặt
+                                <li className="nav-item ms-lg-3">
+                                    <div className="d-flex bg-white bg-opacity-25 rounded-pill p-1 position-relative" style={{ width: '240px', height: '40px' }}>
+                                        {/* Sliding Background */}
+                                        <div 
+                                            className="position-absolute bg-white rounded-pill shadow-sm" 
+                                            style={{ 
+                                                width: 'calc(50% - 4px)', 
+                                                height: '32px', 
+                                                top: '4px', 
+                                                left: authSliderPos, 
+                                                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                                                zIndex: 0,
+                                                opacity: route().current('notes.shared-with-me') ? 0 : 1
+                                            }} 
+                                        />
+                                        
+                                        <Link 
+                                            href={route('dashboard')} 
+                                            className={`flex-fill d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('dashboard') && !route().current('notes.shared-with-me') ? 'text-primary fw-bold' : 'text-white'}`}
+                                            style={{ fontSize: '0.9rem' }}
+                                        >
+                                            <i className="bi bi-journal-text me-2"></i> Ghi chú
                                         </Link>
-                                    </li>
-                                    <li className="nav-item ms-lg-2">
-                                        <Link className="btn btn-outline-light btn-sm rounded-pill px-4 fw-bold border-2" href={route('logout')} method="post" as="button">
-                                            Thoát
+                                        
+                                        <Link 
+                                            href={route('settings.edit')} 
+                                            className={`flex-fill d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('settings.edit') ? 'text-primary fw-bold' : 'text-white'}`}
+                                            style={{ fontSize: '0.9rem' }}
+                                        >
+                                            <i className="bi bi-gear-fill me-2"></i> Cài đặt
                                         </Link>
-                                    </li>
-                                </>
+                                    </div>
+                                </li>
                             ) : (
-                                <>
-                                    <li className="nav-item">
-                                        <Link className="nav-link" href={route('login')}>Đăng nhập</Link>
-                                    </li>
-                                    <li className="nav-item ms-lg-2">
-                                        <Link className="btn btn-light btn-sm rounded-pill px-4 fw-bold" href={route('register')}>Đăng ký</Link>
-                                    </li>
-                                </>
+                                <li className="nav-item ms-lg-3">
+                                    <div className="d-flex bg-white bg-opacity-25 rounded-pill p-1 position-relative" style={{ width: '210px', height: '40px' }}>
+                                        {/* Sliding Background */}
+                                        <div 
+                                            className="position-absolute bg-white rounded-pill shadow-sm" 
+                                            style={{ 
+                                                width: 'calc(50% - 4px)', 
+                                                height: '32px', 
+                                                top: '4px', 
+                                                left: guestSliderPos, 
+                                                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                                                zIndex: 0
+                                            }} 
+                                        />
+                                        
+                                        <Link 
+                                            href={route('login')} 
+                                            className={`flex-fill d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('login') || (!route().current('login') && !route().current('register')) ? 'text-primary fw-bold' : 'text-white'}`}
+                                            style={{ fontSize: '0.9rem' }}
+                                        >
+                                            Đăng nhập
+                                        </Link>
+                                        
+                                        <Link 
+                                            href={route('register')} 
+                                            className={`flex-fill d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('register') ? 'text-primary fw-bold' : 'text-white'}`}
+                                            style={{ fontSize: '0.9rem' }}
+                                        >
+                                            Đăng ký
+                                        </Link>
+                                    </div>
+                                </li>
                             )}
                         </ul>
                     </div>

@@ -19,6 +19,8 @@ class NoteUpdated implements ShouldBroadcastNow
     public $noteId;
     public $title;
     public $content;
+    public $images;
+    public $labels;
     public $userId;
 
     /**
@@ -29,6 +31,8 @@ class NoteUpdated implements ShouldBroadcastNow
         $this->noteId = $note->id;
         $this->title = $note->title;
         $this->content = $note->content;
+        $this->images = $note->images;
+        $this->labels = $note->labels;
         $this->userId = $userId;
     }
 

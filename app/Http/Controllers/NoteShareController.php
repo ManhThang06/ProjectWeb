@@ -28,9 +28,10 @@ class NoteShareController extends Controller
             });
         }
 
-        if ($request->filled('label_id')) {
-            $query->whereHas('labels', function($q) use ($request) {
-                $q->where('labels.id', $request->label_id);
+        if ($request->filled('label_ids')) {
+            $labelIds = is_array($request->label_ids) ? $request->label_ids : explode(',', $request->label_ids);
+            $query->whereHas('labels', function($q) use ($labelIds) {
+                $q->whereIn('labels.id', $labelIds);
             });
         }
 
@@ -70,8 +71,12 @@ class NoteShareController extends Controller
         return Inertia::render('SharedNotes', [
             'notes' => $notes,
             'openedNote' => $openedNote,
-            'labels' => $user->labels()->get(),
-            'filters' => $request->only(['search', 'label_id']),
+            'labels' => \App\Models\Label::whereHas('notes', function($q) use ($user) {
+                $q->whereHas('sharedWith', function($sq) use ($user) {
+                    $sq->where('users.id', $user->id);
+                });
+            })->distinct()->get(),
+            'filters' => $request->only(['search', 'label_ids']),
             'auth' => [
                 'user' => $user
             ]

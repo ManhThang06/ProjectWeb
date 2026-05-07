@@ -8,8 +8,9 @@ import LabelManager from '@/Components/LabelManager';
 import ConfirmationModal from '@/Components/ConfirmationModal';
 import NotePasswordModal from '@/Components/NotePasswordModal';
 
-export default function SharedNotes({ notes: initialNotes, labels, auth, openedNote }) {
+export default function SharedNotes({ notes: initialNotes, labels: propLabels, auth, openedNote }) {
     const [notes, setNotes] = useState(initialNotes);
+    const [availableLabels, setAvailableLabels] = useState(propLabels);
     const [selectedNote, setSelectedNote] = useState(null);
     const [showModal, setShowModal] = useState(false);
     const [noteForm, setNoteForm] = useState({ title: '', content: '' });
@@ -27,9 +28,10 @@ export default function SharedNotes({ notes: initialNotes, labels, auth, openedN
     const debouncedSearch = useDebounce(searchTerm, 400);
     const { isOnline, saveNote } = useSync();
 
-    // Sync initial notes from props
+    // Sync initial notes and labels from props
     useEffect(() => {
         setNotes(initialNotes);
+        setAvailableLabels(propLabels);
         
         // Cập nhật selectedNote ngay lập tức khi props thay đổi (sau khi upload ảnh/gán nhãn)
         if (selectedNote) {
@@ -43,7 +45,7 @@ export default function SharedNotes({ notes: initialNotes, labels, auth, openedN
                 }));
             }
         }
-    }, [initialNotes]);
+    }, [initialNotes, propLabels]);
 
     // Auto-open note if requested from other pages
     useEffect(() => {
@@ -61,25 +63,84 @@ export default function SharedNotes({ notes: initialNotes, labels, auth, openedN
         }
     }, [debouncedNoteForm]);
 
-    const handleFilter = useCallback((newSearch, newLabelId) => {
+    // REAL-TIME COLLABORATION (Laravel Echo)
+    useEffect(() => {
+        if (showModal && selectedNote) {
+            const channel = window.Echo?.private(`note.${selectedNote.id}`);
+            if (channel) {
+                channel.listen('.note.updated', (e) => {
+                    if (e.userId !== auth?.user?.id) {
+                        setNoteForm({ title: e.title, content: e.content });
+                        setNotes(prev => prev.map(n => n.id === e.noteId ? { ...n, title: e.title, content: e.content, images: e.images, labels: e.labels } : n));
+                        setSelectedNote(prev => prev && prev.id === e.noteId ? { ...prev, title: e.title, content: e.content, images: e.images, labels: e.labels } : prev);
+                        
+                        // Cập nhật danh sách nhãn có sẵn nếu có nhãn mới xuất hiện
+                        if (e.labels) {
+                            setAvailableLabels(prev => {
+                                const combined = [...prev];
+                                e.labels.forEach(newL => {
+                                    if (!combined.find(l => l.id === newL.id)) {
+                                        combined.push(newL);
+                                    }
+                                });
+                                return combined;
+                            });
+                        }
+                    }
+                });
+                return () => channel.stopListening('.note.updated');
+            }
+        }
+    }, [showModal, selectedNote?.id]);
+
+    const handleFilter = useCallback((newSearch, newLabelIds) => {
         router.get(route('notes.shared-with-me'), { 
             search: newSearch, 
-            label_id: newLabelId || undefined
+            label_ids: newLabelIds && newLabelIds.length > 0 ? newLabelIds.join(',') : undefined
         }, { preserveState: true, replace: true, preserveScroll: true });
     }, []);
+
+    const selectedLabelIds = (new URLSearchParams(window.location.search)).get('label_ids')
+        ? (new URLSearchParams(window.location.search)).get('label_ids').split(',')
+        : [];
+
+    const toggleLabelFilter = (labelId) => {
+        let newIds;
+        if (selectedLabelIds.includes(String(labelId))) {
+            newIds = selectedLabelIds.filter(id => id !== String(labelId));
+        } else {
+            newIds = [...selectedLabelIds, String(labelId)];
+        }
+        handleFilter(searchTerm, newIds);
+    };
 
     useEffect(() => {
         const currentSearch = (new URLSearchParams(window.location.search)).get('search') || '';
         if (debouncedSearch !== currentSearch) {
-            handleFilter(debouncedSearch, (new URLSearchParams(window.location.search)).get('label_id'));
+            handleFilter(debouncedSearch, selectedLabelIds);
         }
     }, [debouncedSearch]);
 
     const handleAutoSave = async (note, data) => {
         setIsSaving(true);
         try {
-            const updatedNote = await saveNote(data, note.id);
+            // Đảm bảo ghi chú không bị rỗng hoàn toàn nếu có ảnh
+            const finalData = { ...data };
+            const hasText = data.title?.trim() || data.content?.trim();
+            const hasImages = note.images && note.images.length > 0;
+
+            if (!hasText && hasImages && !data.title?.trim()) {
+                finalData.title = 'Không tiêu đề';
+            }
+
+            const updatedNote = await saveNote(finalData, note.id);
             setNotes(prev => prev.map(n => n.id === note.id ? { ...n, ...updatedNote } : n));
+            
+            // Nếu vừa tự điền 'Không tiêu đề', cập nhật cả form state để người dùng thấy
+            if (finalData.title === 'Không tiêu đề' && data.title !== 'Không tiêu đề') {
+                setNoteForm(prev => ({ ...prev, title: 'Không tiêu đề' }));
+            }
+
             setSelectedNote(prev => ({ ...prev, ...updatedNote }));
         } catch (error) {
             console.error('Auto-save failed', error);
@@ -226,24 +287,30 @@ export default function SharedNotes({ notes: initialNotes, labels, auth, openedN
                     </div>
                 </div>
 
-                <div className="mb-5 overflow-auto pb-2 scrollbar-hide">
-                    <div className="d-flex gap-2 align-items-center">
+                <div className="d-flex flex-wrap gap-2 mb-5 align-items-center">
+                    <button 
+                        className={`btn btn-sm rounded-pill px-4 py-2 border transition-all text-nowrap ${selectedLabelIds.length === 0 ? 'btn-primary shadow-sm' : 'btn-light'}`}
+                        onClick={() => handleFilter(searchTerm, [])}
+                    >
+                        Tất cả
+                    </button>
+                    {availableLabels.map(label => (
                         <button 
-                            className={`btn btn-sm rounded-pill px-4 py-2 border transition-all ${!new URLSearchParams(window.location.search).get('label_id') ? 'btn-primary shadow-sm' : 'btn-light'}`}
-                            onClick={() => handleFilter(searchTerm, null)}
+                            key={label.id} 
+                            className={`btn btn-sm rounded-pill px-4 py-2 border transition-all text-nowrap ${selectedLabelIds.includes(String(label.id)) ? 'btn-primary shadow-sm' : 'btn-light'}`}
+                            onClick={() => toggleLabelFilter(label.id)}
                         >
-                            Tất cả
+                            #{label.name}
                         </button>
-                        {labels.map(label => (
-                            <button 
-                                key={label.id} 
-                                className={`btn btn-sm rounded-pill px-4 py-2 border transition-all ${new URLSearchParams(window.location.search).get('label_id') === String(label.id) ? 'btn-primary shadow-sm' : 'btn-light'}`}
-                                onClick={() => handleFilter(searchTerm, label.id)}
-                            >
-                                #{label.name}
-                            </button>
-                        ))}
-                    </div>
+                    ))}
+                    {selectedLabelIds.length > 0 && (
+                        <button 
+                            className="btn btn-sm btn-link text-danger text-decoration-none ms-2 text-nowrap"
+                            onClick={() => handleFilter(searchTerm, [])}
+                        >
+                            <i className="bi bi-x-circle me-1"></i>Xóa toàn bộ
+                        </button>
+                    )}
                 </div>
 
                 {notes.length === 0 ? (
@@ -365,17 +432,17 @@ export default function SharedNotes({ notes: initialNotes, labels, auth, openedN
                                                     </form>
                                                 )}
                                                 <div className="d-flex flex-wrap gap-2 mb-3">
-                                                    {(labels || []).map(label => (
-                                                        <button 
-                                                            key={label.id} 
-                                                            className={`btn btn-sm rounded-pill px-3 transition-all border ${selectedNote.labels?.some(l => l.id === label.id) ? 'btn-primary shadow-sm' : 'btn-light'}`} 
-                                                            onClick={() => selectedNote.permission === 'edit' && handleLabelSync(label)}
-                                                            disabled={selectedNote.permission !== 'edit'}
-                                                        >
-                                                            #{label.name}
-                                                        </button>
-                                                    ))}
-                                                </div>
+    {(availableLabels || []).map(label => (
+        <button 
+            key={label.id} 
+            className={`btn btn-sm rounded-pill px-3 transition-all border ${selectedNote.labels?.some(l => l.id === label.id) ? 'btn-primary shadow-sm' : 'btn-light'}`} 
+            onClick={() => selectedNote.permission === 'edit' && handleLabelSync(label)}
+            disabled={selectedNote.permission !== 'edit'}
+        >
+            #{label.name}
+        </button>
+    ))}
+</div>
                                             </section>
 
                                             <section className="flex-grow-1">
@@ -420,7 +487,7 @@ export default function SharedNotes({ notes: initialNotes, labels, auth, openedN
                 onSuccess={handlePasswordSuccess} 
                 onCancel={() => { setShowPasswordModal(false); setPendingNote(null); }} 
             />
-            <LabelManager show={showLabelManager} labels={labels} onClose={() => setShowLabelManager(false)} />
+            <LabelManager show={showLabelManager} labels={availableLabels} onClose={() => setShowLabelManager(false)} />
             <ConfirmationModal show={showDeleteModal} title="Xác nhận xóa" message="Dữ liệu ghi chú và hình ảnh sẽ bị xóa vĩnh viễn. Bạn chắc chắn chứ?" onConfirm={handleDelete} onCancel={() => setShowDeleteModal(false)} />
             <Lightbox image={previewImage} onClose={() => setPreviewImage(null)} />
 

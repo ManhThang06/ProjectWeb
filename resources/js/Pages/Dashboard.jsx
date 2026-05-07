@@ -76,7 +76,8 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
                 channel.listen('.note.updated', (e) => {
                     if (e.userId !== auth?.user?.id) {
                         setNoteForm({ title: e.title, content: e.content });
-                        setNotes(prev => prev.map(n => n.id === e.noteId ? { ...n, title: e.title, content: e.content } : n));
+                        setNotes(prev => prev.map(n => n.id === e.noteId ? { ...n, title: e.title, content: e.content, images: e.images, labels: e.labels } : n));
+                        setSelectedNote(prev => prev && prev.id === e.noteId ? { ...prev, title: e.title, content: e.content, images: e.images, labels: e.labels } : prev);
                     }
                 });
                 return () => channel.stopListening('.note.updated');
@@ -84,16 +85,30 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
         }
     }, [showModal, selectedNote?.id]);
 
-    const handleFilter = useCallback((newSearch, newLabelId) => {
+    const handleFilter = useCallback((newSearch, newLabelIds) => {
         router.get(route('dashboard'), { 
             search: newSearch, 
-            label_id: newLabelId || undefined
+            label_ids: newLabelIds && newLabelIds.length > 0 ? newLabelIds.join(',') : undefined
         }, { preserveState: true, replace: true, preserveScroll: true });
     }, []);
 
+    const selectedLabelIds = filters.label_ids 
+        ? (Array.isArray(filters.label_ids) ? filters.label_ids.map(id => String(id)) : String(filters.label_ids).split(',').map(id => String(id)))
+        : [];
+
+    const toggleLabelFilter = (labelId) => {
+        let newIds;
+        if (selectedLabelIds.includes(String(labelId))) {
+            newIds = selectedLabelIds.filter(id => id !== String(labelId));
+        } else {
+            newIds = [...selectedLabelIds, String(labelId)];
+        }
+        handleFilter(search, newIds);
+    };
+
     useEffect(() => {
-        if (debouncedSearch !== filters.search) {
-            handleFilter(debouncedSearch, filters.label_id);
+        if (debouncedSearch !== (filters.search || '')) {
+            handleFilter(debouncedSearch, selectedLabelIds);
         }
     }, [debouncedSearch]);
 
@@ -109,16 +124,26 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
     const handleAutoSave = async (note, data) => {
         setIsSaving(true);
         try {
+            // Đảm bảo ghi chú không bị rỗng hoàn toàn nếu có ảnh
+            const finalData = { ...data };
+            const hasText = data.title?.trim() || data.content?.trim();
+            const hasImages = note.images && note.images.length > 0;
+
+            if (!hasText && hasImages && !data.title?.trim()) {
+                finalData.title = 'Không tiêu đề';
+            }
+
             let updatedNote;
-            // Nếu là ghi chú tạm (chưa lên server), chỉ lưu khi có nội dung thực
-            const hasContent = data.title?.trim() || data.content?.trim();
+            // Nếu là ghi chú tạm (chưa lên server), chỉ lưu khi có nội dung thực hoặc có ảnh
+            const hasActualContent = hasText || hasImages;
+            
             if (!note.server_id && String(note.id).startsWith('temp_')) {
-                if (!hasContent) {
+                if (!hasActualContent) {
                     setIsSaving(false);
-                    return; // Không lưu ghi chú rỗng lên server
+                    return; 
                 }
                 // Lần đầu có nội dung -> tạo mới trên server
-                const res = await axios.post(route('notes.store'), data);
+                const res = await axios.post(route('notes.store'), finalData);
                 updatedNote = { 
                     ...res.data, 
                     server_id: res.data.id, 
@@ -127,7 +152,7 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
                     labels: res.data.labels || [],
                 };
             } else {
-                updatedNote = await saveNote(data, note.server_id || note.id);
+                updatedNote = await saveNote(finalData, note.server_id || note.id);
                 updatedNote = { ...updatedNote, images: note.images || [], labels: note.labels || [] };
             }
             // Thay thế ghi chú tạm bằng ghi chú thật trong state
@@ -135,6 +160,12 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
                 ? { ...n, ...updatedNote } 
                 : n
             ));
+            
+            // Nếu vừa tự điền 'Không tiêu đề', cập nhật cả form state để người dùng thấy
+            if (finalData.title === 'Không tiêu đề' && data.title !== 'Không tiêu đề') {
+                setNoteForm(prev => ({ ...prev, title: 'Không tiêu đề' }));
+            }
+
             setSelectedNote(prev => ({ ...prev, ...updatedNote }));
         } catch (error) {
             console.error('Auto-save failed', error);
@@ -162,16 +193,27 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
     };
 
     const closeNote = () => {
-        setShowModal(false);
-        setSelectedNote(null);
-
-        // Nếu đóng một ghi chú tạm (chưa lên server) và nó vẫn rỗng -> xóa khỏi state
-        if (selectedNote && String(selectedNote.id).startsWith('temp_')) {
+        if (selectedNote) {
             const isEmpty = !noteForm.title?.trim() && !noteForm.content?.trim() && (!selectedNote.images || selectedNote.images.length === 0);
+            
             if (isEmpty) {
-                setNotes(prev => prev.filter(n => n.id !== selectedNote.id));
+                if (!String(selectedNote.id).startsWith('temp_')) {
+                    // Nếu là ghi chú đã có trên server -> xóa thực sự
+                    const id = selectedNote.server_id || selectedNote.id;
+                    router.delete(route('notes.destroy', id), {
+                        onSuccess: () => {
+                            setNotes(prev => prev.filter(n => n.id !== selectedNote.id && n.server_id !== id));
+                        }
+                    });
+                } else {
+                    // Nếu là ghi chú tạm -> chỉ cần xóa khỏi state
+                    setNotes(prev => prev.filter(n => n.id !== selectedNote.id));
+                }
             }
         }
+
+        setShowModal(false);
+        setSelectedNote(null);
 
         const params = new URLSearchParams(window.location.search);
         const fromSource = filters.from || params.get('from');
@@ -410,13 +452,18 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
                     </div>
                 </div>
 
-                <div className="d-flex gap-2 mb-4 overflow-auto pb-3 scrollbar-hide align-items-center">
-                    <button className={`btn btn-sm rounded-pill px-3 fw-medium ${!filters.label_id ? 'btn-primary shadow-sm' : 'btn-body border'}`} onClick={() => handleFilter(search, null)}>Tất cả</button>
+                <div className="d-flex flex-wrap gap-2 mb-4 align-items-center">
+                    <button className={`btn btn-sm rounded-pill px-4 py-2 fw-medium text-nowrap ${selectedLabelIds.length === 0 ? 'btn-primary shadow-sm' : 'btn-body border'}`} onClick={() => handleFilter(search, [])}>Tất cả</button>
                     {labels.map(label => (
-                        <button key={label.id} className={`btn btn-sm rounded-pill px-3 fw-medium ${filters.label_id == label.id ? 'btn-primary shadow-sm' : 'btn-body border'}`} onClick={() => handleFilter(search, label.id)}>{label.name}</button>
+                        <button key={label.id} className={`btn btn-sm rounded-pill px-4 py-2 fw-medium text-nowrap ${selectedLabelIds.includes(String(label.id)) ? 'btn-primary shadow-sm' : 'btn-body border'}`} onClick={() => toggleLabelFilter(label.id)}>#{label.name}</button>
                     ))}
-                    <button className="btn btn-sm btn-outline-secondary rounded-pill border-dashed ms-2" onClick={() => setShowLabelManager(true)}><i className="bi bi-tags-fill me-1"></i>Quản lý nhãn</button>
-                    <div className="ms-auto btn-group shadow-sm bg-body border rounded-pill p-1">
+                    {selectedLabelIds.length > 0 && (
+                        <button className="btn btn-sm btn-link text-danger text-decoration-none ms-2 text-nowrap" onClick={() => handleFilter(search, [])}>
+                            <i className="bi bi-x-circle me-1"></i>Xóa toàn bộ
+                        </button>
+                    )}
+                    <button className="btn btn-sm btn-outline-secondary rounded-pill border-dashed ms-2 text-nowrap" onClick={() => setShowLabelManager(true)}><i className="bi bi-tags-fill me-1"></i>Quản lý nhãn</button>
+                    <div className="ms-md-auto btn-group shadow-sm bg-body border rounded-pill p-1">
                         <button className={`btn btn-sm border-0 rounded-circle ${viewMode === 'grid' ? 'btn-primary shadow-sm' : 'btn-link text-secondary'}`} onClick={() => setViewMode('grid')}><i className="bi bi-grid-fill"></i></button>
                         <button className={`btn btn-sm border-0 rounded-circle ${viewMode === 'list' ? 'btn-primary shadow-sm' : 'btn-link text-secondary'}`} onClick={() => setViewMode('list')}><i className="bi bi-list-ul"></i></button>
                     </div>

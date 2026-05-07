@@ -1,5 +1,5 @@
 import BootstrapLayout from '@/Layouts/BootstrapLayout';
-import { Head, useForm, usePage, router } from '@inertiajs/react';
+import { Head, useForm, usePage, router, Link } from '@inertiajs/react';
 import { useState, useRef } from 'react';
 import axios from 'axios';
 
@@ -174,6 +174,22 @@ export default function Settings({ status }) {
                                                 {isUploadingAvatar ? <><span className="spinner-border spinner-border-sm me-2"></span>Đang lưu...</> : 'Lưu thay đổi'}
                                             </button>
                                         </form>
+
+                                        <hr className="my-5 opacity-25" />
+                                        <div className="d-flex align-items-center justify-content-between p-4 bg-danger bg-opacity-10 rounded-4 border border-danger border-opacity-10">
+                                            <div>
+                                                <h6 className="fw-bold text-danger mb-1">Đăng xuất khỏi thiết bị</h6>
+                                                <p className="text-muted small mb-0">Bạn sẽ cần đăng nhập lại để tiếp tục sử dụng NotePro.</p>
+                                            </div>
+                                            <Link 
+                                                href={route('logout')} 
+                                                method="post" 
+                                                as="button" 
+                                                className="btn btn-danger px-4 rounded-pill fw-bold shadow-sm"
+                                            >
+                                                <i className="bi bi-box-arrow-right me-2"></i> Đăng xuất
+                                            </Link>
+                                        </div>
                                     </div>
                                 )}
 

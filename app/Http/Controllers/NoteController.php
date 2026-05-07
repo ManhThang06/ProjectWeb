@@ -27,9 +27,10 @@ class NoteController extends Controller
             });
         }
 
-        if ($request->filled('label_id')) {
-            $query->whereHas('labels', function($q) use ($request) {
-                $q->where('labels.id', $request->label_id);
+        if ($request->filled('label_ids')) {
+            $labelIds = is_array($request->label_ids) ? $request->label_ids : explode(',', $request->label_ids);
+            $query->whereHas('labels', function($q) use ($labelIds) {
+                $q->whereIn('labels.id', $labelIds);
             });
         }
 
@@ -60,7 +61,7 @@ class NoteController extends Controller
         return Inertia::render('Dashboard', [
             'notes' => $notes,
             'labels' => $user->labels()->get(),
-            'filters' => $request->only(['search', 'label_id', 'from']),
+            'filters' => $request->only(['search', 'label_ids', 'from']),
             'openedNote' => $openedNote
         ]);
     }
@@ -141,6 +142,9 @@ class NoteController extends Controller
         $path = $request->file('image')->store('notes', 'public');
         $note->images()->create(['path' => $path]);
 
+        // Broadcast to others
+        broadcast(new NoteUpdated($note->load('images'), Auth::id()))->toOthers();
+
         return back();
     }
 
@@ -159,6 +163,9 @@ class NoteController extends Controller
 
         Storage::disk('public')->delete($image->path);
         $image->delete();
+
+        // Broadcast to others
+        broadcast(new NoteUpdated($note->load('images'), Auth::id()))->toOthers();
 
         return back();
     }
@@ -189,6 +196,9 @@ class NoteController extends Controller
         // Update DB record
         $image->update(['path' => $path]);
 
+        // Broadcast to others
+        broadcast(new NoteUpdated($note->load('images'), Auth::id()))->toOthers();
+
         return back();
     }
 
@@ -209,6 +219,9 @@ class NoteController extends Controller
         ]);
 
         $note->labels()->sync($request->label_ids);
+
+        // Broadcast to others
+        broadcast(new NoteUpdated($note->load(['labels', 'images']), Auth::id()))->toOthers();
 
         return back();
     }
