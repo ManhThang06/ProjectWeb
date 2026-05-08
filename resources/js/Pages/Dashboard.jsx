@@ -10,7 +10,7 @@ import axios from 'axios';
 import useSync from '@/Hooks/useSync';
 import { db } from '@/db';
 
-export default function Dashboard({ notes: initialNotes, labels, filters, auth, openedNote, errors }) {
+export default function Dashboard({ notes: initialNotes, labels, allLabels: propAllLabels, filters, auth, openedNote, errors }) {
     const [notes, setNotes] = useState(initialNotes);
     const [viewMode, setViewMode] = useState('grid');
     const [search, setSearch] = useState(filters.search || '');
@@ -27,6 +27,7 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
     const [noteToDelete, setNoteToDelete] = useState(null);
     const [previewImage, setPreviewImage] = useState(null);
     const [quickLabelName, setQuickLabelName] = useState('');
+    const [allLabels, setAllLabels] = useState(propAllLabels || labels);
 
     const [noteForm, setNoteForm] = useState({ title: '', content: '' });
     const debouncedNoteForm = useDebounce(noteForm, 300);
@@ -59,7 +60,10 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
             const updated = initialNotes.find(n => n.id === (selectedNote.server_id || selectedNote.id));
             if (updated) setSelectedNote(prev => ({ ...prev, ...updated, images: updated.images || [], labels: updated.labels || [] }));
         }
-    }, [initialNotes]);
+
+        // Cập nhật danh sách nhãn khi props thay đổi
+        setAllLabels(propAllLabels || labels);
+    }, [initialNotes, labels, propAllLabels]);
 
     // Auto-open note if requested from other pages
     useEffect(() => {
@@ -76,8 +80,22 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
                 channel.listen('.note.updated', (e) => {
                     if (e.userId !== auth?.user?.id) {
                         setNoteForm({ title: e.title, content: e.content });
-                        setNotes(prev => prev.map(n => n.id === e.noteId ? { ...n, title: e.title, content: e.content, images: e.images, labels: e.labels } : n));
-                        setSelectedNote(prev => prev && prev.id === e.noteId ? { ...prev, title: e.title, content: e.content, images: e.images, labels: e.labels } : prev);
+                        setNotes(prev => prev.map(n => n.id === e.noteId ? { ...n, title: e.title, content: e.content, images: e.images, labels: (e.labels || []).filter(l => l.user_id === auth.user.id) } : n));
+                        setSelectedNote(prev => prev && prev.id === e.noteId ? { ...prev, title: e.title, content: e.content, images: e.images, labels: (e.labels || []).filter(l => l.user_id === auth.user.id) } : prev);
+
+                        // Cập nhật danh sách nhãn nếu có nhãn mới của mình xuất hiện (do người khác gán)
+                        if (e.labels) {
+                            setAllLabels(prev => {
+                                const combined = [...prev];
+                                e.labels.forEach(newL => {
+                                    // Chỉ thêm nếu nhãn này thuộc về mình và chưa có trong danh sách
+                                    if (newL.user_id === auth.user.id && !combined.find(l => l.id === newL.id)) {
+                                        combined.push(newL);
+                                    }
+                                });
+                                return combined;
+                            });
+                        }
                     }
                 });
                 return () => channel.stopListening('.note.updated');
@@ -389,25 +407,34 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
     };
 
     const handleLabelSync = (label) => {
+        // Đảm bảo ghi chú đã được lưu trên server
+        const noteId = selectedNote.server_id || selectedNote.id;
+        if (String(noteId).startsWith('temp_')) return;
+
         const currentLabels = selectedNote.labels.map(l => l.id);
         const newLabelIds = currentLabels.includes(label.id) 
             ? currentLabels.filter(id => id !== label.id) 
             : [...currentLabels, label.id];
 
-        router.post(route('notes.labels', selectedNote.id), { label_ids: newLabelIds }, {
+        router.post(route('notes.labels', noteId), { label_ids: newLabelIds }, {
             preserveScroll: true,
-            onSuccess: () => router.reload({ only: ['notes'] })
+            onSuccess: () => router.reload({ only: ['notes', 'labels'] })
         });
     };
 
     const handleQuickAddLabel = (e) => {
         e.preventDefault();
         if (!quickLabelName.trim()) return;
-        router.post(route('labels.store'), { name: quickLabelName }, {
-            onSuccess: (page) => {
-                const newLabel = page.props.labels.find(l => l.name === quickLabelName);
-                if (newLabel) handleLabelSync(newLabel);
+
+        // Đảm bảo ghi chú đã được lưu trên server
+        const noteId = selectedNote.server_id || selectedNote.id;
+        if (String(noteId).startsWith('temp_')) return;
+
+        router.post(route('notes.labels.add', noteId), { name: quickLabelName }, {
+            preserveScroll: true,
+            onSuccess: () => {
                 setQuickLabelName('');
+                router.reload({ only: ['notes', 'labels'] });
             }
         });
     };
@@ -574,7 +601,7 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
                                                     </div>
                                                 </form>
                                                 <div className="d-flex flex-wrap gap-2 mb-3">
-                                                    {labels.map(label => (
+                                                    {allLabels.map(label => (
                                                         <button key={label.id} className={`btn btn-sm rounded-pill px-3 transition-all border ${selectedNote.labels.some(l => l.id === label.id) ? 'btn-primary shadow-sm' : 'btn-light'}`} onClick={() => handleLabelSync(label)}>#{label.name}</button>
                                                     ))}
                                                 </div>
@@ -613,7 +640,7 @@ export default function Dashboard({ notes: initialNotes, labels, filters, auth, 
             <NotePasswordModal show={showPasswordModal} note={pendingAction?.note} onSuccess={handlePasswordSuccess} onCancel={() => { closeNote(); setPendingAction(null); }} />
             <NoteShareModal show={showShareModal} note={selectedNote} onClose={() => setShowShareModal(false)} />
             <Lightbox image={previewImage} onClose={() => setPreviewImage(null)} />
-            <LabelManager show={showLabelManager} labels={labels} onClose={() => setShowLabelManager(false)} />
+            <LabelManager show={showLabelManager} labels={allLabels} onClose={() => setShowLabelManager(false)} />
             <ConfirmationModal show={showDeleteModal} title="Xác nhận xóa" message="Dữ liệu ghi chú và hình ảnh sẽ bị xóa vĩnh viễn. Bạn chắc chắn chứ?" onConfirm={handleDelete} onCancel={() => setShowDeleteModal(false)} />
 
             <style dangerouslySetInnerHTML={{ __html: `

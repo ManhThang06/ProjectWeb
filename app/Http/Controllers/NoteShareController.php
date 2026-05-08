@@ -18,7 +18,9 @@ class NoteShareController extends Controller
     {
         $user = Auth::user();
         $query = $user->sharedNotes()
-            ->with(['user:id,display_name,email', 'labels', 'images']);
+            ->with(['user:id,display_name,email', 'labels' => function($q) use ($user) {
+                $q->where('user_id', $user->id);
+            }, 'images']);
 
         if ($request->filled('search')) {
             $search = $request->search;
@@ -54,7 +56,9 @@ class NoteShareController extends Controller
 
         $openedNote = null;
         if ($request->filled('open')) {
-            $openedNote = Note::with(['labels', 'images', 'sharedWith:id,display_name,email', 'user:id,display_name,email'])
+            $openedNote = Note::with(['labels' => function($q) use ($user) {
+                $q->where('user_id', $user->id);
+            }, 'images', 'sharedWith:id,display_name,email', 'user:id,display_name,email'])
                 ->whereHas('sharedWith', function($sq) use ($user) {
                     $sq->where('users.id', $user->id);
                 })
@@ -71,11 +75,11 @@ class NoteShareController extends Controller
         return Inertia::render('SharedNotes', [
             'notes' => $notes,
             'openedNote' => $openedNote,
-            'labels' => \App\Models\Label::whereHas('notes', function($q) use ($user) {
+            'labels' => $user->labels()->whereHas('notes', function($q) use ($user) {
                 $q->whereHas('sharedWith', function($sq) use ($user) {
                     $sq->where('users.id', $user->id);
                 });
-            })->distinct()->get(),
+            })->get(),
             'filters' => $request->only(['search', 'label_ids']),
             'auth' => [
                 'user' => $user

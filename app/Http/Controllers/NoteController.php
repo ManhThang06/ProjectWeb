@@ -17,7 +17,9 @@ class NoteController extends Controller
         $user = Auth::user();
 
         // Ghi chú của tôi
-        $query = $user->notes()->with(['labels', 'images', 'sharedWith:id,display_name,email']);
+        $query = $user->notes()->with(['labels' => function($q) use ($user) {
+            $q->where('user_id', $user->id);
+        }, 'images', 'sharedWith:id,display_name,email']);
 
         if ($request->has('search')) {
             $search = $request->search;
@@ -44,7 +46,9 @@ class NoteController extends Controller
 
         $openedNote = null;
         if ($request->filled('open')) {
-            $openedNote = Note::with(['labels', 'images', 'sharedWith:id,display_name,email', 'user:id,display_name,email'])
+            $openedNote = Note::with(['labels' => function($q) use ($user) {
+                    $q->where('user_id', $user->id);
+                }, 'images', 'sharedWith:id,display_name,email', 'user:id,display_name,email'])
                 ->where(function($q) use ($user) {
                     $q->where('user_id', $user->id)
                       ->orWhereHas('sharedWith', function($sq) use ($user) {
@@ -60,7 +64,9 @@ class NoteController extends Controller
 
         return Inertia::render('Dashboard', [
             'notes' => $notes,
-            'labels' => $user->labels()->get(),
+            'labels' => $user->labels()->whereHas('notes', function($q) use ($user) {
+                $q->where('user_id', $user->id);
+            })->get(),
             'filters' => $request->only(['search', 'label_ids', 'from']),
             'openedNote' => $openedNote
         ]);
@@ -100,10 +106,12 @@ class NoteController extends Controller
 
         $note->update($validated);
 
+        $note->load(['labels', 'images']);
+        
         // Phát sự kiện WebSocket để cập nhật Real-time
         broadcast(new NoteUpdated($note, Auth::id()))->toOthers();
 
-        return response()->json($note->load(['labels', 'images']));
+        return response()->json($note);
     }
 
     public function destroy(Note $note)
@@ -218,9 +226,78 @@ class NoteController extends Controller
             'label_ids.*' => 'exists:labels,id',
         ]);
 
-        $note->labels()->sync($request->label_ids);
+        $requestedLabelIds = $request->label_ids ?: [];
+        $currentUser = Auth::user();
+        $owner = $note->user;
+        
+        $requestedLabels = \App\Models\Label::whereIn('id', $requestedLabelIds)->get();
+        $labelNames = $requestedLabels->pluck('name')->toArray();
 
-        // Broadcast to others
+        // 1. Nếu người đang sửa là cộng tác viên, tạo gương cho chủ sở hữu
+        if ($currentUser->id !== $owner->id) {
+            foreach ($labelNames as $name) {
+                $ownerLabel = $owner->labels()->firstOrCreate(['name' => $name]);
+                $requestedLabelIds[] = $ownerLabel->id;
+            }
+        } 
+        // 2. Nếu người đang sửa là chủ sở hữu, tạo gương cho TẤT CẢ cộng tác viên
+        else {
+            foreach ($note->sharedWith as $collaborator) {
+                foreach ($labelNames as $name) {
+                    $collabLabel = $collaborator->labels()->firstOrCreate(['name' => $name]);
+                    $requestedLabelIds[] = $collabLabel->id;
+                }
+            }
+        }
+
+        $note->labels()->sync(array_unique($requestedLabelIds));
+
+        // Phát sự kiện Real-time
+        broadcast(new NoteUpdated($note->load(['labels', 'images']), Auth::id()))->toOthers();
+
+        return back();
+    }
+
+    public function addLabel(Request $request, Note $note)
+    {
+        $isOwner = $note->user_id === Auth::id();
+        $isSharedEditor = $note->sharedWith()
+                               ->where('users.id', Auth::id())
+                               ->where('permission', 'edit')
+                               ->exists();
+
+        if (!$isOwner && !$isSharedEditor) {
+            abort(403);
+        }
+
+        $request->validate([
+            'name' => 'required|string|max:50',
+        ]);
+
+        $currentUser = Auth::user();
+        $owner = $note->user;
+        $labelName = $request->name;
+
+        // 1. Tìm hoặc tạo nhãn cho người dùng hiện tại
+        $currentLabel = $currentUser->labels()->firstOrCreate(['name' => $labelName]);
+        
+        // 2. Gán vào ghi chú (không xóa các nhãn khác)
+        $note->labels()->syncWithoutDetaching([$currentLabel->id]);
+
+        // 3. Nếu là cộng tác viên thêm nhãn, tạo gương cho chủ sở hữu
+        if ($currentUser->id !== $owner->id) {
+            $ownerLabel = $owner->labels()->firstOrCreate(['name' => $labelName]);
+            $note->labels()->syncWithoutDetaching([$ownerLabel->id]);
+        }
+        // 4. Nếu là chủ sở hữu thêm nhãn, tạo gương cho tất cả cộng tác viên hiện tại
+        else {
+            foreach ($note->sharedWith as $collaborator) {
+                $collabLabel = $collaborator->labels()->firstOrCreate(['name' => $labelName]);
+                $note->labels()->syncWithoutDetaching([$collabLabel->id]);
+            }
+        }
+
+        // Phát sự kiện Real-time
         broadcast(new NoteUpdated($note->load(['labels', 'images']), Auth::id()))->toOthers();
 
         return back();

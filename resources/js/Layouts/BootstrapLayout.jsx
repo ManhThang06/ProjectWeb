@@ -104,16 +104,16 @@ export default function BootstrapLayout({ children }) {
                                         
                                         <Link 
                                             href={route('dashboard')} 
-                                            className={`flex-fill d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('dashboard') && !route().current('notes.shared-with-me') ? 'text-primary fw-bold' : 'text-white'}`}
-                                            style={{ fontSize: '0.9rem' }}
+                                            className={`w-50 d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('dashboard') && !route().current('notes.shared-with-me') ? 'text-primary fw-bold' : 'text-white'}`}
+                                            style={{ fontSize: '0.9rem', lineHeight: '1' }}
                                         >
                                             <i className="bi bi-journal-text me-2"></i> Ghi chú
                                         </Link>
                                         
                                         <Link 
                                             href={route('settings.edit')} 
-                                            className={`flex-fill d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('settings.edit') ? 'text-primary fw-bold' : 'text-white'}`}
-                                            style={{ fontSize: '0.9rem' }}
+                                            className={`w-50 d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('settings.edit') ? 'text-primary fw-bold' : 'text-white'}`}
+                                            style={{ fontSize: '0.9rem', lineHeight: '1' }}
                                         >
                                             <i className="bi bi-gear-fill me-2"></i> Cài đặt
                                         </Link>
@@ -137,16 +137,16 @@ export default function BootstrapLayout({ children }) {
                                         
                                         <Link 
                                             href={route('login')} 
-                                            className={`flex-fill d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('login') || (!route().current('login') && !route().current('register')) ? 'text-primary fw-bold' : 'text-white'}`}
-                                            style={{ fontSize: '0.9rem' }}
+                                            className={`w-50 d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('login') || (!route().current('login') && !route().current('register')) ? 'text-primary fw-bold' : 'text-white'}`}
+                                            style={{ fontSize: '0.9rem', lineHeight: '1' }}
                                         >
                                             Đăng nhập
                                         </Link>
                                         
                                         <Link 
                                             href={route('register')} 
-                                            className={`flex-fill d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('register') ? 'text-primary fw-bold' : 'text-white'}`}
-                                            style={{ fontSize: '0.9rem' }}
+                                            className={`w-50 d-flex align-items-center justify-content-center text-decoration-none rounded-pill position-relative z-1 transition-all ${route().current('register') ? 'text-primary fw-bold' : 'text-white'}`}
+                                            style={{ fontSize: '0.9rem', lineHeight: '1' }}
                                         >
                                             Đăng ký
                                         </Link>

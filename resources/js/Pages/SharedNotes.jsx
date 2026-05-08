@@ -8,9 +8,10 @@ import LabelManager from '@/Components/LabelManager';
 import ConfirmationModal from '@/Components/ConfirmationModal';
 import NotePasswordModal from '@/Components/NotePasswordModal';
 
-export default function SharedNotes({ notes: initialNotes, labels: propLabels, auth, openedNote }) {
+export default function SharedNotes({ notes: initialNotes, labels: propLabels, allLabels: propAllLabels, auth, openedNote }) {
     const [notes, setNotes] = useState(initialNotes);
     const [availableLabels, setAvailableLabels] = useState(propLabels);
+    const [allLabels, setAllLabels] = useState(propAllLabels || propLabels);
     const [selectedNote, setSelectedNote] = useState(null);
     const [showModal, setShowModal] = useState(false);
     const [noteForm, setNoteForm] = useState({ title: '', content: '' });
@@ -32,6 +33,7 @@ export default function SharedNotes({ notes: initialNotes, labels: propLabels, a
     useEffect(() => {
         setNotes(initialNotes);
         setAvailableLabels(propLabels);
+        setAllLabels(propAllLabels || propLabels);
         
         // Cập nhật selectedNote ngay lập tức khi props thay đổi (sau khi upload ảnh/gán nhãn)
         if (selectedNote) {
@@ -71,14 +73,26 @@ export default function SharedNotes({ notes: initialNotes, labels: propLabels, a
                 channel.listen('.note.updated', (e) => {
                     if (e.userId !== auth?.user?.id) {
                         setNoteForm({ title: e.title, content: e.content });
-                        setNotes(prev => prev.map(n => n.id === e.noteId ? { ...n, title: e.title, content: e.content, images: e.images, labels: e.labels } : n));
-                        setSelectedNote(prev => prev && prev.id === e.noteId ? { ...prev, title: e.title, content: e.content, images: e.images, labels: e.labels } : prev);
+                        setNotes(prev => prev.map(n => n.id === e.noteId ? { ...n, title: e.title, content: e.content, images: e.images, labels: (e.labels || []).filter(l => l.user_id === auth.user.id) } : n));
+                        setSelectedNote(prev => prev && prev.id === e.noteId ? { ...prev, title: e.title, content: e.content, images: e.images, labels: (e.labels || []).filter(l => l.user_id === auth.user.id) } : prev);
                         
                         // Cập nhật danh sách nhãn có sẵn nếu có nhãn mới xuất hiện
                         if (e.labels) {
+                            const myLabels = e.labels.filter(l => l.user_id === auth.user.id);
+                            
                             setAvailableLabels(prev => {
                                 const combined = [...prev];
-                                e.labels.forEach(newL => {
+                                myLabels.forEach(newL => {
+                                    if (!combined.find(l => l.id === newL.id)) {
+                                        combined.push(newL);
+                                    }
+                                });
+                                return combined;
+                            });
+
+                            setAllLabels(prev => {
+                                const combined = [...prev];
+                                myLabels.forEach(newL => {
                                     if (!combined.find(l => l.id === newL.id)) {
                                         combined.push(newL);
                                     }
@@ -226,11 +240,11 @@ export default function SharedNotes({ notes: initialNotes, labels: propLabels, a
     const handleQuickAddLabel = (e) => {
         e.preventDefault();
         if (!quickLabelName.trim()) return;
-        router.post(route('labels.store'), { name: quickLabelName }, {
-            onSuccess: (page) => {
-                const newLabel = page.props.labels.find(l => l.name === quickLabelName);
-                if (newLabel) handleLabelSync(newLabel);
+        router.post(route('notes.labels.add', selectedNote.id), { name: quickLabelName }, {
+            preserveScroll: true,
+            onSuccess: () => {
                 setQuickLabelName('');
+                router.reload({ only: ['notes', 'labels'] });
             }
         });
     };
@@ -432,7 +446,7 @@ export default function SharedNotes({ notes: initialNotes, labels: propLabels, a
                                                     </form>
                                                 )}
                                                 <div className="d-flex flex-wrap gap-2 mb-3">
-    {(availableLabels || []).map(label => (
+                                                    {(allLabels || availableLabels || []).map(label => (
         <button 
             key={label.id} 
             className={`btn btn-sm rounded-pill px-3 transition-all border ${selectedNote.labels?.some(l => l.id === label.id) ? 'btn-primary shadow-sm' : 'btn-light'}`} 
